@@ -27,6 +27,10 @@ public class CPHInline
         // Award position and points
         AwardPosition(user, currentCounter);
 
+        // Place on leaderboard (OBS display)
+        PlaceOnLeaderboard(user, currentCounter);
+        CPH.PlaySound("F:\\Stream\\Assets\\Mp3\\telegram-notification.mp3", 1, false, "confetti");
+
         // Increment counter
         CPH.SetGlobalVar("chatCounter", currentCounter + 1, false);
 
@@ -128,8 +132,23 @@ public class CPHInline
         if (currentCounter >= MAX_POSITIONS)
         {
             CPH.DisableActionById("de46f6ec-0a00-4760-a9fe-ae2c671f3f6f");
+            CPH.ObsSetSourceVisibility("first_chatters", "confetti", true);
+            CPH.Wait(7000);
+            CPH.ObsSetSourceVisibility("Fortnite", "first_chatters", false);
             return true;
         }
         return false;
+    }
+
+    private void PlaceOnLeaderboard(string user, int position)
+    {
+        // OBS text source names (adjust these to match your OBS scene)
+        string[] obsTextSources = { "first_chatter", "second_chatter", "third_chatter" };
+
+        // Set the text for the corresponding position
+        if (position < obsTextSources.Length)
+        {
+            CPH.ObsSetGdiText("first_chatters", obsTextSources[position], user);
+        }
     }
 }
