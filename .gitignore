@@ -1,0 +1,12 @@
+*.env
+.env.*
+*.json
+*.csv
+*.log
+*.yaml
+*.yml
+*.ini
+*.secret
+*.bak
+
+my-scripts/testing/
