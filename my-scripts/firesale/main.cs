@@ -37,6 +37,9 @@ public class CPHInline
     private const string KEY_EXCLUDE_GROUPS = "fireSaleExcludeGroups";
     private const string KEY_ORIGINAL_COSTS = "fireSale_originalCosts";
 
+    // Timer ID for auto-ending fire sale (replace with actual Timer ID from Streamer.bot)
+    private const string TIMER_ID_END_SALE = "d50840a9-696e-40f8-b89d-f712ecb5027f";
+
     // DateTime format for consistent serialization
     private const string DATE_FORMAT = "yyyy-MM-dd HH:mm:ss";
 
@@ -71,12 +74,37 @@ public class CPHInline
             return true; // Already off, nothing to reset
         }
 
+        // Disable auto-end timer if it was running
+        CPH.DisableTimerById(TIMER_ID_END_SALE);
+
         int restoredCount = RestoreOriginalCosts();
         ClearFireSaleState();
 
         // Send message
         CPH.SendMessage(
             $"🔥 Fire sale reset! Restored {restoredCount} rewards to original prices."
+        );
+
+        return true;
+    }
+
+    // PUBLIC: Called by timer action when duration expires
+    public bool TimerEndSale()
+    {
+        // Check if fire sale is still active (safety check)
+        bool isActive = CPH.GetGlobalVar<bool>(KEY_ACTIVE, true);
+        if (!isActive)
+        {
+            return true; // Already ended, nothing to do
+        }
+
+        // Reset the fire sale
+        int restoredCount = RestoreOriginalCosts();
+        ClearFireSaleState();
+
+        // Send message indicating auto-end
+        CPH.SendMessage(
+            $"⏰ Fire sale has ended automatically! Restored {restoredCount} rewards to original prices."
         );
 
         return true;
@@ -673,15 +701,24 @@ public class CPHInline
             {
                 DateTime endTime = DateTime.Now.AddMinutes(minutes);
                 CPH.SetGlobalVar(KEY_END_TIME, endTime.ToString(DATE_FORMAT), true);
+
+                // Enable and configure timer for auto-end
+                int durationInSeconds = minutes * 60;
+                CPH.EnableTimerById(TIMER_ID_END_SALE);
+                CPH.SetTimerInterval(TIMER_ID_END_SALE, durationInSeconds);
             }
             else
             {
                 CPH.SetGlobalVar(KEY_END_TIME, "", true);
+                // Disable timer if duration parsing failed
+                CPH.DisableTimerById(TIMER_ID_END_SALE);
             }
         }
         else
         {
             CPH.SetGlobalVar(KEY_END_TIME, "", true);
+            // Disable timer if no duration specified
+            CPH.DisableTimerById(TIMER_ID_END_SALE);
         }
     }
 
