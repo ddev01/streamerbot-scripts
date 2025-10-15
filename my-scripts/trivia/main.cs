@@ -118,6 +118,13 @@ public class CPHInline
             if (string.IsNullOrEmpty(userMessage) || string.IsNullOrEmpty(username))
                 return true;
 
+            // Only process single letter answers (A, B, C, D)
+            string trimmedMessage = userMessage.Trim().ToUpper();
+            if (trimmedMessage.Length != 1 || !IsValidAnswer(trimmedMessage))
+            {
+                return true; // Not a valid trivia answer, ignore
+            }
+
             // Check if user has already participated
             if (HasUserParticipated(username))
             {
@@ -132,9 +139,14 @@ public class CPHInline
             string correctText = CPH.GetGlobalVar<string>(KEY_CORRECT_TEXT, false);
 
             // Check if answer is correct
-            if (userMessage.Trim().Equals(correctAnswer, StringComparison.OrdinalIgnoreCase))
+            if (trimmedMessage.Equals(correctAnswer, StringComparison.OrdinalIgnoreCase))
             {
                 HandleCorrectAnswer(username, userId, correctAnswer, correctText);
+            }
+            else
+            {
+                // Send message for incorrect answer
+                CPH.SendMessage($"❌ Sorry {username}, that's not correct!");
             }
 
             return true;
@@ -329,5 +341,11 @@ public class CPHInline
     private void ClearParticipatedUsers()
     {
         CPH.UnsetGlobalVar(KEY_PARTICIPATED_USERS, false);
+    }
+
+    /// Validates if the answer is a valid trivia option (A, B, C, or D)
+    private bool IsValidAnswer(string answer)
+    {
+        return answer == "A" || answer == "B" || answer == "C" || answer == "D";
     }
 }
