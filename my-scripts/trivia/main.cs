@@ -12,6 +12,7 @@ public static class TriviaConfig
         "https://the-trivia-api.com/v2/questions?limit=1&difficulty=easy";
     public const int TRIVIA_DURATION_SECONDS = 30;
     public const int POINTS_REWARD = 1500;
+    public const string TIMER_ID_END_TRIVIA = "a6b42235-d5a1-4318-89b7-d3200de65c9b";
 }
 
 // ===== API MODELS =====
@@ -77,20 +78,12 @@ public class CPHInline
             // Enable the answer checker action
             CPH.EnableActionById(TriviaConfig.ANSWER_CHECKER_ACTION_ID);
 
-            // Wait for answer window
-            CPH.Wait(TriviaConfig.TRIVIA_DURATION_SECONDS * 1000);
-
-            // Check if someone won
-            if (!CPH.GetGlobalVar<bool>(KEY_TRIVIA_WON, false))
-            {
-                // Nobody won - reveal the answer
-                CPH.SendMessage(
-                    $"⏰ Time's up! Nobody got it right. The correct answer was {correctAnswerLetter}: {question.CorrectAnswer}"
-                );
-            }
-
-            // Clean up
-            CleanupTrivia();
+            // Start timer to end trivia after duration
+            CPH.EnableTimerById(TriviaConfig.TIMER_ID_END_TRIVIA);
+            CPH.SetTimerInterval(
+                TriviaConfig.TIMER_ID_END_TRIVIA,
+                TriviaConfig.TRIVIA_DURATION_SECONDS
+            );
 
             return true;
         }
@@ -158,6 +151,34 @@ public class CPHInline
         }
     }
 
+    // PUBLIC: Called by timer action when trivia duration expires
+    public bool TimerEndTrivia()
+    {
+        // Check if trivia is still active (safety check)
+        bool isActive = CPH.GetGlobalVar<bool>(KEY_TRIVIA_ACTIVE, false);
+        if (!isActive)
+        {
+            return true; // Already ended, nothing to do
+        }
+
+        // Check if someone won
+        if (!CPH.GetGlobalVar<bool>(KEY_TRIVIA_WON, false))
+        {
+            // Nobody won - reveal the answer
+            string correctAnswerLetter = CPH.GetGlobalVar<string>(KEY_CORRECT_ANSWER, false);
+            string correctText = CPH.GetGlobalVar<string>(KEY_CORRECT_TEXT, false);
+
+            CPH.SendMessage(
+                $"⏰ Time's up! Nobody got it right. The correct answer was {correctAnswerLetter}: {correctText}"
+            );
+        }
+
+        // Clean up
+        CleanupTrivia();
+
+        return true;
+    }
+
     // ===== PRIVATE HELPER METHODS =====
     /// Sets the trivia state in global variables
     private void SetTriviaState(string correctAnswerLetter, string correctAnswerText)
@@ -196,9 +217,6 @@ public class CPHInline
         // Mark trivia as won
         CPH.SetGlobalVar(KEY_TRIVIA_WON, true, false);
 
-        // Clear participated users list since someone won
-        ClearParticipatedUsers();
-
         // Award points using Twitch user variables
         AwardPoints(userId, TriviaConfig.POINTS_REWARD);
 
@@ -207,8 +225,8 @@ public class CPHInline
             $"🎉 {username} got the right answer! It was {correctAnswer}: {correctText} and received {TriviaConfig.POINTS_REWARD:N0} points!"
         );
 
-        // Disable answer checker
-        CPH.DisableActionById(TriviaConfig.ANSWER_CHECKER_ACTION_ID);
+        // Clean up trivia state (disables timer, answer checker, and clears all variables)
+        CleanupTrivia();
     }
 
     /// Awards points to a user using Twitch user variables
@@ -302,7 +320,8 @@ public class CPHInline
     /// Cleans up trivia state and disables answer checker
     private void CleanupTrivia()
     {
-        CPH.DisableAction(TriviaConfig.ANSWER_CHECKER_ACTION_ID);
+        CPH.DisableTimerById(TriviaConfig.TIMER_ID_END_TRIVIA);
+        CPH.DisableActionById(TriviaConfig.ANSWER_CHECKER_ACTION_ID);
         CPH.UnsetGlobalVar(KEY_TRIVIA_ACTIVE, false);
         CPH.UnsetGlobalVar(KEY_TRIVIA_WON, false);
         CPH.UnsetGlobalVar(KEY_CORRECT_ANSWER, false);
