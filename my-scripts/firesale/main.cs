@@ -74,16 +74,17 @@ public class CPHInline
             return true; // Already off, nothing to reset
         }
 
+        // IMMEDIATE FEEDBACK: Send processing message before the slow restore
+        CPH.SendMessage("🔥 Fire sale ending! Restoring original reward prices...");
+
         // Disable auto-end timer if it was running
         CPH.DisableTimerById(TIMER_ID_END_SALE);
 
         int restoredCount = RestoreOriginalCosts();
         ClearFireSaleState();
 
-        // Send message
-        CPH.SendMessage(
-            $"🔥 Fire sale reset! Restored {restoredCount} rewards to original prices."
-        );
+        // Send completion message
+        CPH.SendMessage($"✅ Fire sale ended! Restored {restoredCount} rewards to original prices.");
 
         return true;
     }
@@ -553,10 +554,11 @@ public class CPHInline
             string[] excludeParts = excludeGroups.Split(',');
             foreach (string part in excludeParts)
             {
-                string trimmed = part.Trim();
-                if (!string.IsNullOrEmpty(trimmed))
+                // Trim, convert to lowercase, and handle empty string as "no group"
+                string normalized = part.Trim().ToLower();
+                if (!string.IsNullOrEmpty(normalized))
                 {
-                    excludeList.Add(trimmed);
+                    excludeList.Add(normalized);
                 }
             }
         }
@@ -575,31 +577,36 @@ public class CPHInline
             string[] includeParts = rewardGroups.Split(',');
             foreach (string part in includeParts)
             {
-                string trimmed = part.Trim();
-                if (!string.IsNullOrEmpty(trimmed))
+                // Trim, convert to lowercase, and handle empty string as "no group"
+                string normalized = part.Trim().ToLower();
+                if (!string.IsNullOrEmpty(normalized))
                 {
-                    includeList.Add(trimmed);
+                    includeList.Add(normalized);
                 }
             }
 
-            // Filter rewards by include list
+            // Filter rewards by include list (case-insensitive, space-stripped)
             filteredRewards = new List<TwitchReward>();
             foreach (var reward in rewards)
             {
-                if (includeList.Contains(reward.Group ?? ""))
+                // Normalize reward group: trim spaces, lowercase
+                string rewardGroup = (reward.Group ?? "").Trim().ToLower();
+                if (includeList.Contains(rewardGroup))
                 {
                     filteredRewards.Add(reward);
                 }
             }
         }
 
-        // Exclude specified groups (higher priority - even if in include list)
+        // Exclude specified groups (higher priority - even if in include list, case-insensitive, space-stripped)
         if (excludeList.Count > 0)
         {
             var finalRewards = new List<TwitchReward>();
             foreach (var reward in filteredRewards)
             {
-                if (!excludeList.Contains(reward.Group ?? ""))
+                // Normalize reward group: trim spaces, lowercase
+                string rewardGroup = (reward.Group ?? "").Trim().ToLower();
+                if (!excludeList.Contains(rewardGroup))
                 {
                     finalRewards.Add(reward);
                 }
