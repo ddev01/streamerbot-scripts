@@ -131,6 +131,56 @@ public class CPHInline
                     })
                     .DefaultByValue(GetVoiceAliasesFromSettings().FirstOrDefault() ?? "")
             )
+            .Section("Anti-Spam", "Anti-Spam", s => s
+                .Intro("Protect TTS from spam. Messages that match enabled rules are blocked before costing points.")
+                .Toggle("Enable anti-spam", "antispam_enabled")
+                    .Hint("Master switch for all anti-spam checks.")
+                    .Default(true)
+                .WithVisibility("antispam_enabled", (PanelBuilder v) => v
+                    .Toggle("Repetitive phrase detection", "antispam_repetitive_phrase")
+                        .Hint("Blocks messages like 'word1 word2 word1 word2 word1 word2' (same phrase repeating).")
+                        .Default(true)
+                    .WithVisibility("antispam_repetitive_phrase", false, (PanelBuilder v2) => v2
+                        .Flex(f => f
+                            .IntegerInput("Pattern length (words)", "antispam_repetitive_pattern_len")
+                                .Hint("Length of the phrase to check (e.g. 2 = 'sybau streamer').")
+                                .Range(1, 10)
+                                .Default(2)
+                            .IntegerInput("Min repeats to block", "antispam_repetitive_min_repeats")
+                                .Hint("Block if phrase repeats this many times.")
+                                .Range(2, 20)
+                                .Default(3)
+                        )
+                    )
+                    .Toggle("Character repetition detection", "antispam_char_repeat")
+                        .Hint("Blocks messages with same character repeated (e.g. 'aaaaaa', '!!!!!!').")
+                        .Default(true)
+                    .WithVisibility("antispam_char_repeat", false, (PanelBuilder v2) => v2
+                        .IntegerInput("Max same character streak", "antispam_char_repeat_max")
+                            .Hint("Block if any character repeats more than this.")
+                            .Range(2, 20)
+                            .Default(5)
+                    )
+                    .Toggle("Uniqueness ratio check", "antispam_uniqueness_ratio")
+                        .Hint("Blocks when too few unique words (e.g. 2 unique in 12 words = spam).")
+                        .Default(true)
+                    .WithVisibility("antispam_uniqueness_ratio", false, (PanelBuilder v2) => v2
+                        .NumberInput("Min unique word ratio", "antispam_min_uniqueness")
+                            .Hint("0.4 = at least 40% of words must be unique.")
+                            .Range(0.1, 1.0)
+                            .Default(0.4)
+                    )
+                    .Toggle("Max message length", "antispam_max_length")
+                        .Hint("Block messages over a character limit.")
+                        .Default(true)
+                    .WithVisibility("antispam_max_length", false, (PanelBuilder v2) => v2
+                        .IntegerInput("Max characters", "antispam_max_length_chars")
+                            .Hint("Maximum allowed message length.")
+                            .Range(50, 2000)
+                            .Default(500)
+                    )
+                )
+            )
             
             .Show();
 

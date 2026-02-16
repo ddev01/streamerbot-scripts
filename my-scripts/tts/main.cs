@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Newtonsoft.Json.Linq;
 
 public class CPHInline
@@ -35,6 +36,17 @@ public class CPHInline
         public string[] VoiceAliases { get; set; } = Array.Empty<string>();
         public string DefaultVoiceAlias { get; set; } = "";
         public Dictionary<string, List<(int price, string duration)>> VoicePrices { get; set; } = new Dictionary<string, List<(int, string)>>();
+        // Anti-spam
+        public bool AntiSpamEnabled { get; set; } = true;
+        public bool AntiSpamRepetitivePhrase { get; set; } = true;
+        public int AntiSpamRepetitivePhraseMinRepeats { get; set; } = 3;
+        public int AntiSpamRepetitivePhrasePatternLen { get; set; } = 2;
+        public bool AntiSpamCharacterRepeat { get; set; } = true;
+        public int AntiSpamCharRepeatMax { get; set; } = 5;
+        public bool AntiSpamUniquenessRatio { get; set; } = true;
+        public double AntiSpamMinUniquenessRatio { get; set; } = 0.4;
+        public bool AntiSpamMaxLength { get; set; } = true;
+        public int AntiSpamMaxLengthChars { get; set; } = 500;
     }
 
     private TtsSettings LoadTtsSettings()
@@ -84,6 +96,17 @@ public class CPHInline
                 }
                 s.VoicePrices[alias] = tiers;
             }
+
+            s.AntiSpamEnabled = obj["antispam_enabled"]?.Value<bool>() ?? true;
+            s.AntiSpamRepetitivePhrase = obj["antispam_repetitive_phrase"]?.Value<bool>() ?? true;
+            s.AntiSpamRepetitivePhraseMinRepeats = obj["antispam_repetitive_min_repeats"]?.Value<int>() ?? 3;
+            s.AntiSpamRepetitivePhrasePatternLen = obj["antispam_repetitive_pattern_len"]?.Value<int>() ?? 2;
+            s.AntiSpamCharacterRepeat = obj["antispam_char_repeat"]?.Value<bool>() ?? true;
+            s.AntiSpamCharRepeatMax = obj["antispam_char_repeat_max"]?.Value<int>() ?? 5;
+            s.AntiSpamUniquenessRatio = obj["antispam_uniqueness_ratio"]?.Value<bool>() ?? true;
+            s.AntiSpamMinUniquenessRatio = obj["antispam_min_uniqueness"]?.Value<double>() ?? 0.4;
+            s.AntiSpamMaxLength = obj["antispam_max_length"]?.Value<bool>() ?? true;
+            s.AntiSpamMaxLengthChars = obj["antispam_max_length_chars"]?.Value<int>() ?? 500;
         }
         catch (Exception ex)
         {
@@ -262,6 +285,133 @@ public class CPHInline
 
     #endregion
 
+    #region Anti-Spam
+
+    private static readonly char[] WordSeparators = { ' ' };
+    private static readonly char[] TrimChars = { '.', ',', '!', '?', ':', ';', '"', '\'', '(', ')', '[', ']', '{', '}' };
+
+    /// <summary>Returns true if the message appears to be spam. Checks repetitive phrases, character repeat, uniqueness ratio, and max length.</summary>
+    private (bool isSpam, string reason) CheckAntiSpam(string message, TtsSettings settings)
+    {
+        if (!settings.AntiSpamEnabled)
+            return (false, null);
+
+        if (string.IsNullOrWhiteSpace(message))
+            return (false, null);
+
+        var normalizedMessage = NormalizeMessage(message);
+        if (normalizedMessage.Length == 0)
+            return (false, null);
+
+        var words = normalizedMessage.Split(WordSeparators, StringSplitOptions.RemoveEmptyEntries);
+
+        // 1. Max length
+        if (settings.AntiSpamMaxLength && normalizedMessage.Length > settings.AntiSpamMaxLengthChars)
+            return (true, "Message too long.");
+
+        // 2. Repetitive phrase (sliding-window)
+        if (settings.AntiSpamRepetitivePhrase && words.Length >= settings.AntiSpamRepetitivePhrasePatternLen)
+        {
+            if (HasRepetitivePhrase(words, settings.AntiSpamRepetitivePhrasePatternLen, settings.AntiSpamRepetitivePhraseMinRepeats))
+                return (true, "Repetitive phrase detected.");
+        }
+
+        // 3. Character repetition (single pass)
+        if (settings.AntiSpamCharacterRepeat && settings.AntiSpamCharRepeatMax > 0)
+        {
+            if (HasTooManyRepeatedChars(normalizedMessage, settings.AntiSpamCharRepeatMax))
+                return (true, "Too many repeated characters.");
+        }
+
+        // 4. Uniqueness ratio (words normalized: strip punctuation)
+        if (settings.AntiSpamUniquenessRatio && words.Length > 1)
+        {
+            var uniqueCount = words.Select(NormalizeWord).Where(w => w.Length > 0).Distinct().Count();
+            var ratio = (double)uniqueCount / words.Length;
+            if (ratio < settings.AntiSpamMinUniquenessRatio)
+                return (true, "Too many repeated words.");
+        }
+
+        return (false, null);
+    }
+
+    private static string NormalizeMessage(string message)
+    {
+        var trimmed = message.Trim();
+        var sb = new StringBuilder(trimmed.Length);
+        bool prevSpace = false;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!prevSpace) { sb.Append(' '); prevSpace = true; }
+            }
+            else
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+                prevSpace = false;
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string NormalizeWord(string word)
+    {
+        return word.Trim(TrimChars).ToLowerInvariant();
+    }
+
+    private static bool HasTooManyRepeatedChars(string text, int maxSame)
+    {
+        if (text.Length == 0) return false;
+        int currentRun = 1;
+        for (int i = 1; i < text.Length; i++)
+        {
+            if (text[i] == text[i - 1])
+            {
+                currentRun++;
+                if (currentRun > maxSame) return true;
+            }
+            else
+            {
+                currentRun = 1;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasRepetitivePhrase(string[] words, int maxPatternLen, int minRepeats)
+    {
+        maxPatternLen = Math.Max(1, Math.Min(maxPatternLen, words.Length / 2));
+        minRepeats = Math.Max(2, minRepeats);
+
+        for (int pl = 1; pl <= maxPatternLen; pl++)
+        {
+            if (words.Length < pl * minRepeats) continue;
+
+            for (int start = 0; start <= words.Length - pl * minRepeats; start++)
+            {
+                bool allEqual = true;
+                for (int r = 1; r < minRepeats && allEqual; r++)
+                {
+                    for (int i = 0; i < pl; i++)
+                    {
+                        var w1 = words[start + (r - 1) * pl + i];
+                        var w2 = words[start + r * pl + i];
+                        if (!w1.Equals(w2, StringComparison.OrdinalIgnoreCase))
+                        {
+                            allEqual = false;
+                            break;
+                        }
+                    }
+                }
+                if (allEqual) return true;
+            }
+        }
+        return false;
+    }
+
+    #endregion
+
     #region Args Helper
 
     private bool TryGetArgs(out string user, out string userId, out string rawInput)
@@ -314,6 +464,14 @@ public class CPHInline
         if (string.IsNullOrEmpty(message))
         {
             CPH.SendMessage($"@{user}, Usage: !tts <message>");
+            return false;
+        }
+
+        // 2.5. Anti-spam check
+        var (isSpam, spamReason) = CheckAntiSpam(message, settings);
+        if (isSpam)
+        {
+            CPH.SendMessage($"@{user}, Message blocked by anti-spam: {spamReason}");
             return false;
         }
 
