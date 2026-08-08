@@ -33,7 +33,11 @@ public class QuestionText
     public string Text { get; set; }
 }
 
+#if EXTERNAL_EDITOR
+public class TriviaMain : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     // Global variable keys (constants for maintainability)
     private const string KEY_TRIVIA_ACTIVE = "triviaActive";
@@ -220,6 +224,9 @@ public class CPHInline
         // Award points using Twitch user variables
         AwardPoints(userId, TriviaConfig.POINTS_REWARD);
 
+        // Award trivia win
+        AwardTriviaWin(userId);
+
         // Announce winner
         CPH.SendMessage(
             $"🎉 {username} got the right answer! It was {correctAnswer}: {correctText} and received {TriviaConfig.POINTS_REWARD:N0} points!"
@@ -249,6 +256,25 @@ public class CPHInline
         }
 
         CPH.SetTwitchUserVarById(userId, pointsVarName, currentPoints, true);
+    }
+
+    /// Awards a trivia win to a user using Twitch user variables
+    private void AwardTriviaWin(string userId)
+    {
+        string winsVarName = "triviaWins";
+        string currentWinsStr = CPH.GetTwitchUserVarById<string>(userId, winsVarName, true);
+
+        long currentWins = 0;
+        if (!string.IsNullOrEmpty(currentWinsStr) && long.TryParse(currentWinsStr, out currentWins))
+        {
+            currentWins += 1;
+        }
+        else
+        {
+            currentWins = 1;
+        }
+
+        CPH.SetTwitchUserVarById(userId, winsVarName, currentWins, true);
     }
 
     /// Fetches trivia question from The Trivia API
