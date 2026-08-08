@@ -22,7 +22,11 @@ public class FireSaleParams
     public string ExcludeGroups { get; set; }
 }
 
+#if EXTERNAL_EDITOR
+public class FiresaleMain : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     // Global variable keys (constants for type safety and maintainability)
     private const string KEY_ACTIVE = "fireSaleActive";

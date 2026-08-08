@@ -5,7 +5,11 @@ using System.Net.Http;
 using System.Text;
 using Newtonsoft.Json;
 
+#if EXTERNAL_EDITOR
+public class SiteMain : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     // ===== CONFIGURATION =====
     private const string API_BASE_URL = "https://gargoyled-gearldine-interfamily.ngrok-free.dev";

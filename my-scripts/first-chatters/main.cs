@@ -1,6 +1,10 @@
 using System;
 
+#if EXTERNAL_EDITOR
+public class FirstChattersMain : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     private const int MAX_POSITIONS = 3;
     private readonly int[] AWARDS = { 1000, 500, 250 };

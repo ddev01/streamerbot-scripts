@@ -1,12 +1,15 @@
 using FluentConfig;
-using FluentConfig.Elements;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Controls;
 using Newtonsoft.Json.Linq;
 
+#if EXTERNAL_EDITOR
+public class TtsSettings : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     private const string Title = "TTS Sell System";
     private const string Version = "1.0";

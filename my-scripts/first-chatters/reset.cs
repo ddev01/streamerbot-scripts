@@ -1,6 +1,10 @@
 using System;
 
+#if EXTERNAL_EDITOR
+public class FirstChattersReset : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     public bool Execute()
     {
