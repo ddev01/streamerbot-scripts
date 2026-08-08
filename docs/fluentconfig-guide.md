@@ -37,6 +37,8 @@ public class CPHInline
 
 Or collapse open/focus: `FluentConfigUi.ShowOrFocus(CPH, title, version, ui => ui.Section(...));`
 
+Local `SbFormat` / Ctrl+S keeps FluentConfig chains in this Laravel layout. Streamer.bot’s Format Document still flattens them — re-run local format afterward if needed.
+
 ## Controls
 
 On `SectionBuilder` / `PanelBuilder`: Toggle, Textbox, Slider, Dropdown, NumberInput, IntegerInput,
