@@ -1,13 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
 
+#if EXTERNAL_EDITOR
+public class TtsMain : CPHInlineBase
+#else
 public class CPHInline
+#endif
 {
     private const string SettingsKey = "FluentConfig_Settings_TTS Sell System";
     private const string PermanentExpiry = "permanent";
+    private const string PurchaseLogPath = "logs/tts-purchases.log";
 
     // --- Execute (empty - each action calls a different function) ---
     public bool Execute()
@@ -426,6 +432,53 @@ public class CPHInline
 
     #endregion
 
+    #region Purchase Logging
+
+    /// <summary>Logs a purchase to the purchase log file.</summary>
+    private void LogPurchase(string user, string userId, string purchaseType, int cost, string voice = null, string duration = null, string message = null)
+    {
+        try
+        {
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            var logParts = new List<string>
+            {
+                $"[{timestamp}]",
+                $"User: {user}",
+                $"UserId: {userId}",
+                $"Type: {purchaseType}",
+                $"Cost: {cost:N0} points"
+            };
+
+            if (!string.IsNullOrEmpty(voice))
+                logParts.Add($"Voice: {voice}");
+            
+            if (!string.IsNullOrEmpty(duration))
+                logParts.Add($"Duration: {duration}");
+            
+            if (!string.IsNullOrEmpty(message))
+                logParts.Add($"Message: {message}");
+
+            string logEntry = string.Join(" | ", logParts);
+
+            // Ensure the logs directory exists
+            string logDirectory = Path.GetDirectoryName(PurchaseLogPath);
+            if (!string.IsNullOrEmpty(logDirectory) && !Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+
+            // Append to log file
+            File.AppendAllText(PurchaseLogPath, logEntry + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            // Fallback to CPH logging if file writing fails
+            CPH.LogError($"[TTS] Failed to write purchase log: {ex.Message}");
+        }
+    }
+
+    #endregion
+
     #region TtsSpeak
 
     private bool DoTtsSpeak()
@@ -489,6 +542,9 @@ public class CPHInline
                 return false;
             }
             CPH.SetTwitchUserVarById(userId, pointsVar, currentPoints - cost, true);
+            
+            // Log TTS purchase
+            LogPurchase(user, userId, "TTS Usage", (int)cost, voice, null, message);
         }
 
         // 4. Speak
@@ -759,8 +815,22 @@ public class CPHInline
             return false;
         }
 
-        var durationInput = NormalizeDurationInput(parts[parts.Length - 1]);
-        var voiceInput = string.Join(" ", parts.Take(parts.Length - 1)).Trim();
+        var timeUnits = new[] { "days", "day", "hours", "hour", "minutes", "minute", "seconds", "second", "weeks", "week" };
+        var lastPart = parts[parts.Length - 1].ToLowerInvariant();
+        string durationInputRaw;
+        int durationPartCount;
+        if (parts.Length >= 3 && timeUnits.Contains(lastPart))
+        {
+            durationInputRaw = parts[parts.Length - 2] + " " + parts[parts.Length - 1];
+            durationPartCount = 2;
+        }
+        else
+        {
+            durationInputRaw = parts[parts.Length - 1];
+            durationPartCount = 1;
+        }
+        var durationInput = NormalizeDurationInput(durationInputRaw);
+        var voiceInput = string.Join(" ", parts.Take(parts.Length - durationPartCount)).Trim();
 
         var matchingAlias = settings.VoiceAliases.FirstOrDefault(a =>
             string.Equals(a, voiceInput, StringComparison.OrdinalIgnoreCase));
@@ -789,7 +859,7 @@ public class CPHInline
 
         if (matchedTier == null)
         {
-            CPH.SendMessage($"@{user}, No tier matches duration '{parts[parts.Length - 1]}' for {matchingAlias}. Use !ttsvoices to see options.");
+            CPH.SendMessage($"@{user}, No tier matches duration '{durationInputRaw}' for {matchingAlias}. Use !ttsvoices to see options.");
             return false;
         }
 
@@ -846,6 +916,9 @@ public class CPHInline
 
         var durDisplay = FormatDurationForDisplay(pending.Duration);
         CPH.SendMessage($"@{user}, You purchased {pending.Voice} TTS ({durDisplay}). It is now your active voice!");
+        
+        // Log voice purchase
+        LogPurchase(user, userId, "Voice Purchase", pending.Price, pending.Voice, pending.Duration);
         return true;
     }
 
