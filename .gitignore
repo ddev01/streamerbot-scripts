@@ -1,12 +1,40 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# IDE / editor
+.cursor/
+.vscode/
+*.swp
+*~
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Secrets & local config
 *.env
 .env.*
-*.json
-*.csv
-*.log
-*.yaml
-*.yml
-*.ini
 *.secret
+*.ini
 *.bak
 
+# Data exports (may contain account-specific values)
+*.csv
+*.log
+streamerbot-points-wt-to-streamelements/*.txt
+
+# Streamer.bot / project-specific
 my-scripts/testing/
+SB-FluentConfig
+
+# Broad config formats (often hold tokens or local paths)
+*.json
+*.yaml
+*.yml
