@@ -9,9 +9,15 @@ obj/
 
 # IDE / editor
 .cursor/
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.swp
 *~
+
+# Local research / scratch
+.tmp-monaco-extract/
+node_modules/
 
 # OS junk
 Thumbs.db
@@ -39,3 +45,7 @@ SB-FluentConfig
 *.json
 *.yaml
 *.yml
+!package.json
+!package-lock.json
+!.vscode/settings.json
+!.vscode/extensions.json

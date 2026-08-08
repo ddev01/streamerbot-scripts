@@ -1,0 +1,22 @@
+root = true
+
+# Align editors with Streamer.bot Format Document (Roslyn NormalizeWhitespace).
+# Do not add rules that change brace style, wrapping, or spacing beyond this.
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.cs]
+# Match SbFormat / Streamer.bot: no forced final newline beyond what Roslyn emits.
+insert_final_newline = false
+indent_size = 4
+indent_style = space
+end_of_line = crlf
+
+[*.{js,cjs,mjs,ts,tsx,json,md,yml,yaml}]
+indent_size = 2
