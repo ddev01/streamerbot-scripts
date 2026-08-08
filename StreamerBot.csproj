@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net481</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <UseWPF>true</UseWPF>
+    <DefineConstants>EXTERNAL_EDITOR</DefineConstants>
+    <NoWarn>CS0114;CS8632</NoWarn>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <!-- Set to your Streamer.bot install directory (contains Streamer.bot.exe and DLLs) -->
+    <StreamerBotPath>CHANGE_ME</StreamerBotPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="my-scripts/**/*.cs" />
+    <Compile Include="community-scripts/**/*.cs" />
+    <!-- Needs TawmaeUI.dll (not present in this Streamer.bot install) -->
+    <Compile Remove="community-scripts/tawmae/watchtime/leaderboard.cs" />
+    <!-- Installed FluentConfig.dll API doesn't match this script; still editable, just not in project compile -->
+    <Compile Remove="my-scripts/tts/settings.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Streamer.bot.Plugin.Interface" />
+    <Using Include="Streamer.bot.Plugin.Interface.Model" />
+    <Using Include="Streamer.bot.Plugin.Interface.Enums" />
+    <Using Include="Streamer.bot.Common.Events" />
+
+    <Reference Include="$(StreamerBotPath)/Streamer.bot.Plugin.Interface.dll" />
+    <Reference Include="$(StreamerBotPath)/Streamer.bot.Common.dll" />
+    <Reference Include="$(StreamerBotPath)/Twitch.Common.dll" />
+
+    <Reference Include="$(StreamerBotPath)/NAudio*.dll" />
+    <Reference Include="$(StreamerBotPath)/Wpf*.dll" />
+    <Reference Include="$(StreamerBotPath)/Newtonsoft.Json.dll" />
+    <Reference Include="$(StreamerBotPath)/System.*.dll" />
+
+    <Reference Include="System.Web" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+</Project>
