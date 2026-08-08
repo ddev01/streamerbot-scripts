@@ -7,17 +7,15 @@
     <DefineConstants>EXTERNAL_EDITOR</DefineConstants>
     <NoWarn>CS0114;CS8632</NoWarn>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-
-    <!-- Set to your Streamer.bot install directory (contains Streamer.bot.exe and DLLs) -->
-    <StreamerBotPath>CHANGE_ME</StreamerBotPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="my-scripts/**/*.cs" />
     <Compile Include="community-scripts/**/*.cs" />
+    <Compile Remove="my-scripts/testing/**" />
     <!-- Needs TawmaeUI.dll (not present in this Streamer.bot install) -->
     <Compile Remove="community-scripts/tawmae/watchtime/leaderboard.cs" />
     <!-- Installed FluentConfig.dll API doesn't match this script; still editable, just not in project compile -->
-    <Compile Remove="my-scripts/tts/settings.cs" />
+    <Compile Remove="my-scripts/backlog/tts/settings.cs" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Streamer.bot.Plugin.Interface" />

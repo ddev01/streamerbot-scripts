@@ -14,4 +14,6 @@ Regenerate DLL dumps:
 .\scripts\Generate-ApiDocs.ps1
 ```
 
+IntelliSense (`CPH`, `CPHInlineBase`): copy `Directory.Build.props.user.example` to `Directory.Build.props.user` and set `StreamerBotPath` to your Streamer.bot install folder (or set env `STREAMERBOT_PATH`). Reload the C# language server after changing it.
+
 Upstream FluentConfig docs (not copied here): `F:\Dev\SB-FluentConfig\docs\` and examples under `F:\Dev\SB-FluentConfig\examples\`.

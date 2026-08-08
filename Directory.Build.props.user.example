@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Copy to Directory.Build.props.user (gitignored) and set your install path -->
+    <StreamerBotPath>CHANGE_ME</StreamerBotPath>
+  </PropertyGroup>
+</Project>

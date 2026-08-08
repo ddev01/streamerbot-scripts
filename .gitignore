@@ -24,6 +24,7 @@ Desktop.ini
 *.secret
 *.ini
 *.bak
+Directory.Build.props.user
 
 # Data exports (may contain account-specific values)
 *.csv
