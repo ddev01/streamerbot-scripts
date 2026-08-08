@@ -1,0 +1,13 @@
+{
+  "name": "streamerbot-scripts",
+  "private": true,
+  "description": "Local tooling for Streamer.bot C# scripts (SbFormat via Prettier)",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:cs": "prettier --write \"**/*.cs\"",
+    "format:check": "prettier --check \"**/*.cs\""
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}

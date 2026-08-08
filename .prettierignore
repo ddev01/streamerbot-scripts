@@ -1,0 +1,9 @@
+bin/
+obj/
+node_modules/
+.tmp-monaco-extract/
+**/.git/
+*.dll
+*.exe
+*.pdb
+package-lock.json
