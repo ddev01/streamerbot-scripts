@@ -41,6 +41,9 @@ streamerbot-points-wt-to-streamelements/*.txt
 my-scripts/testing/
 SB-FluentConfig
 
+# Local junction to upstream FluentConfig examples (do not commit)
+docs/fluentconfig-examples/
+
 # Broad config formats (often hold tokens or local paths)
 *.json
 *.yaml
@@ -49,3 +52,4 @@ SB-FluentConfig
 !package-lock.json
 !.vscode/settings.json
 !.vscode/extensions.json
+.tmp/
