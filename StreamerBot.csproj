@@ -30,8 +30,10 @@
     <Reference Include="$(StreamerBotPath)/NAudio*.dll" />
     <Reference Include="$(StreamerBotPath)/Wpf*.dll" />
     <Reference Include="$(StreamerBotPath)/Newtonsoft.Json.dll" />
+    <Reference Include="$(StreamerBotPath)/dlls/FluentConfig.dll" />
     <Reference Include="$(StreamerBotPath)/System.*.dll" />
 
+    <Reference Include="System.Core" />
     <Reference Include="System.Web" />
     <Reference Include="System.Net.Http" />
   </ItemGroup>
