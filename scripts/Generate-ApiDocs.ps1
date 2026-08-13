@@ -1,4 +1,6 @@
 # Regenerates docs/cph-api.md and docs/fluentconfig-api.md from local DLLs.
+# FluentConfig surface includes Fc runtime helpers, Grid/Row/RepeatFor/Size, Comparator, and Runtime.* types.
+# After rebuilding FluentConfig.dll, pass -FluentConfigDll to the new build (or redeploy into Streamer.bot dlls/).
 param(
   [string]$StreamerBotPath = $env:STREAMERBOT_PATH,
   [string]$FluentConfigDll = '',
@@ -6,6 +8,23 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Streamer.bot ships .NET Framework DLLs with obfuscated nested types in Common.dll.
+# Reflection only works under Windows PowerShell 5.1 (.NET Framework), not PowerShell 7+.
+if ($PSVersionTable.PSEdition -eq 'Core') {
+  $windowsPs = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  if (-not (Test-Path -LiteralPath $windowsPs)) {
+    throw 'Generate-ApiDocs.ps1 requires Windows PowerShell 5.1. Streamer.bot DLLs cannot be reflected under PowerShell 7.'
+  }
+  $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+  if ($StreamerBotPath) { $argList += '-StreamerBotPath'; $argList += $StreamerBotPath }
+  if ($FluentConfigDll) { $argList += '-FluentConfigDll'; $argList += $FluentConfigDll }
+  if ($OutDir) { $argList += '-OutDir'; $argList += $OutDir }
+  & $windowsPs @argList
+  if ($LASTEXITCODE) { exit $LASTEXITCODE }
+  return
+}
+
 $repoRoot = Split-Path $PSScriptRoot -Parent
 if (-not $StreamerBotPath) {
   throw 'Set STREAMERBOT_PATH or pass -StreamerBotPath to your Streamer.bot install directory.'
@@ -74,8 +93,12 @@ function Get-PropertySignatures([Type]$type) {
   }
 }
 
-# Load Streamer.bot deps then interface
-Get-ChildItem (Join-Path $StreamerBotPath '*.dll') | ForEach-Object {
+function Get-EnumMembers([Type]$type) {
+  [Enum]::GetNames($type) | Sort-Object
+}
+
+# Load Streamer.bot managed deps (skip native DLLs in the install root).
+Get-ChildItem (Join-Path $StreamerBotPath 'Streamer.bot*.dll') | ForEach-Object {
   try { [void][Reflection.Assembly]::LoadFrom($_.FullName) } catch {}
 }
 $cphAsm = [Reflection.Assembly]::LoadFrom((Join-Path $StreamerBotPath 'Streamer.bot.Plugin.Interface.dll'))
@@ -146,11 +169,18 @@ $fcAsm = [Reflection.Assembly]::LoadFrom($FluentConfigDll)
 $authorTypes = @(
   @{ Name = 'FluentConfig.FluentConfigUi'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.FluentConfig'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.Fc'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.SectionBuilder'; DeclaredOnly = $false },
   @{ Name = 'FluentConfig.PanelBuilder'; DeclaredOnly = $false },
   @{ Name = 'FluentConfig.IControlOptions'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.Comparator'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.UiContext'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.CallbackContext'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.KnownBots'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.Runtime.ExtensionLogger'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.Runtime.EventContext'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.Runtime.MessageTemplates'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.Runtime.SettingsRedaction'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.Updater.GitHubUpdater'; DeclaredOnly = $true }
 )
 
@@ -161,7 +191,9 @@ $fb = New-Object System.Text.StringBuilder
 [void]$fb.AppendLine("Generated: $(Get-Date -Format 'yyyy-MM-dd')")
 [void]$fb.AppendLine('Author source/docs: `F:\Dev\SB-FluentConfig`')
 [void]$fb.AppendLine('')
-[void]$fb.AppendLine('Authoring surface only. Control factories are on `SectionBuilder` / `PanelBuilder`; option methods chain via `IControlOptions`.')
+[void]$fb.AppendLine('Authoring surface only. Prefer `Fc.*` in action scripts. Control factories are on `SectionBuilder` / `PanelBuilder`; option methods chain via `IControlOptions`.')
+[void]$fb.AppendLine('Layout: `Grid`/`Row`/`Size` use 1:1 Tailwind class names (see [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\LAYOUT.md`).')
+[void]$fb.AppendLine('Runtime helpers (`LoadSettings`/`SetSetting`/`LoadData`/`Logger`/`CaptureEvent`/`ApplyTemplate`): [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\DIALOGS_AND_RUNTIME_VALUES.md`.')
 [void]$fb.AppendLine('Usage patterns: [fluentconfig-guide.md](fluentconfig-guide.md).')
 [void]$fb.AppendLine('')
 
@@ -172,12 +204,21 @@ foreach ($entry in $authorTypes) {
     [void]$fb.AppendLine('')
     continue
   }
-  $kind = if ($t.IsInterface) { 'interface' } else { 'class' }
+  $kind = if ($t.IsEnum) { 'enum' } elseif ($t.IsInterface) { 'interface' } else { 'class' }
   [void]$fb.AppendLine("## $kind $($entry.Name)")
   [void]$fb.AppendLine('')
   [void]$fb.AppendLine('```csharp')
-  foreach ($line in (Get-MethodSignatures $t -declaredOnly:([bool]$entry.DeclaredOnly))) {
-    [void]$fb.AppendLine($line)
+  if ($t.IsEnum) {
+    foreach ($line in (Get-EnumMembers $t)) {
+      [void]$fb.AppendLine($line)
+    }
+  } else {
+    foreach ($line in (Get-PropertySignatures $t)) {
+      [void]$fb.AppendLine($line)
+    }
+    foreach ($line in (Get-MethodSignatures $t -declaredOnly:([bool]$entry.DeclaredOnly))) {
+      [void]$fb.AppendLine($line)
+    }
   }
   [void]$fb.AppendLine('```')
   [void]$fb.AppendLine('')
