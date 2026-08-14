@@ -22,12 +22,6 @@
     "hidefiles.globalConfig": {
         "profiles": [
             {
-                "name": "Default",
-                "detail": "",
-                "description": "Test",
-                "hidden": [".vscode/"]
-            },
-            {
                 "name": "Strict",
                 "detail": "Hide everything not immediately required",
                 "hidden": [
@@ -51,8 +45,15 @@
                     "package.json",
                     "prettier-plugin-sb-csharp.cjs",
                     "StreamerBot.csproj",
-                    "docs/"
+                    "docs/",
+                    ".tmp/ext_dump/"
                 ]
+            },
+            {
+                "name": "Default",
+                "detail": "",
+                "description": "Test",
+                "hidden": [".vscode/"]
             }
         ]
     },
@@ -62,27 +63,7 @@
         "**/.hg": true,
         "**/CVS": true,
         "**/.DS_Store": true,
-        ".vscode/": true,
-        ".cursor/": true,
-        ".cursor/rules/": true,
-        "bin/": true,
-        "node_modules/": true,
-        "obj/": true,
-        "scripts/": true,
-        "streamerbot-points-wt-to-streamelements/": true,
-        "tools/": true,
-        ".editorconfig": true,
-        ".gitignore": true,
-        ".prettierignore": true,
-        ".prettierrc.cjs": true,
-        "Directory.Build.props": true,
-        "Directory.Build.props.user": true,
-        "Directory.Build.props.user.example": true,
-        "package-lock.json": true,
-        "package.json": true,
-        "prettier-plugin-sb-csharp.cjs": true,
-        "StreamerBot.csproj": true,
-        "docs/": true
+        ".vscode/": true
     },
-    "hidefiles.selectedProfile": "Strict"
+    "hidefiles.selectedProfile": "Default"
 }
