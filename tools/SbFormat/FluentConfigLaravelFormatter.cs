@@ -7,6 +7,9 @@ namespace SbFormat;
 /// <summary>
 /// After Roslyn NormalizeWhitespace (SB-compatible compact base), re-expand FluentConfig
 /// fluent chains into Laravel-style line breaks. Non-fluent code stays collapsed.
+/// Also normalizes option-method order on each control (Hint first, then shape, choices,
+/// constraints, defaults, layout). Control / section children stay in source order except
+/// Intro, which is moved first among siblings.
 /// </summary>
 internal static class FluentConfigLaravelFormatter
 {
@@ -14,6 +17,7 @@ internal static class FluentConfigLaravelFormatter
     private static readonly HashSet<string> UiMethods = new(StringComparer.Ordinal)
     {
         "Create",
+        "Open",
         "Section",
         "Show",
         "ShowOrFocus",
@@ -79,6 +83,39 @@ internal static class FluentConfigLaravelFormatter
         "WithPermanentOption",
         "WithStepper",
     };
+    // Stable rank for options chained on one control. Unknown names keep source order at the end.
+    private static readonly string[] OptionOrder =
+    [
+        "Hint",
+        "Multiline",
+        "Password",
+        "WithPermanentOption",
+        "WithStepper",
+        "Options",
+        "OptionsPairs",
+        "WithPairValue",
+        "Preset",
+        "Refresh",
+        "RefreshPairs",
+        "AllowDuplicates",
+        "MaxSelected",
+        "WithExclusive",
+        "Range",
+        "Step",
+        "Default",
+        "DefaultByValue",
+        "DefaultIndex",
+        "DefaultIndices",
+        "Size",
+        "Span",
+        "Color",
+        "Text",
+        "ItemTemplate",
+        "OnPillAdded",
+        "OnPillRemoved",
+        "OnClick",
+        "ShowWhen",
+    ];
     public static SyntaxNode Apply(SyntaxNode root)
     {
         var rewriter = new Rewriter();
@@ -150,6 +187,7 @@ internal static class FluentConfigLaravelFormatter
     private static bool IsIdentifierRoot(ExpressionSyntax expr) => expr is IdentifierNameSyntax;
     private static string FormatChain(ExpressionSyntax rootExpr, List<(string Name, ArgumentListSyntax Args)> links, int stmtIndentCols, bool isLambdaParamRoot)
     {
+        NormalizeLinkOrder(links);
         var sb = new StringBuilder();
         sb.Append(StripOuterTrivia(rootExpr));
         for (var i = 0; i < links.Count; i++)
@@ -170,6 +208,60 @@ internal static class FluentConfigLaravelFormatter
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Sort option methods after each control. Do not reorder controls (Toggle vs Textbox vs
+    /// WithVisibility) except Intro, which always becomes the first sibling in the chain.
+    /// </summary>
+    private static void NormalizeLinkOrder(List<(string Name, ArgumentListSyntax Args)> links)
+    {
+        if (links.Count < 2)
+            return;
+        var groups = new List<(string Name, ArgumentListSyntax Args, List<(string Name, ArgumentListSyntax Args)> Options)>();
+        foreach (var link in links)
+        {
+            if (OptionMethods.Contains(link.Name) && groups.Count > 0)
+            {
+                groups[^1].Options.Add(link);
+                continue;
+            }
+
+            groups.Add((link.Name, link.Args, []));
+        }
+
+        var ordered = new List<(string Name, ArgumentListSyntax Args, List<(string Name, ArgumentListSyntax Args)> Options)>(groups.Count);
+        foreach (var g in groups)
+        {
+            if (g.Name == "Intro")
+                ordered.Add(g);
+        }
+
+        foreach (var g in groups)
+        {
+            if (g.Name != "Intro")
+                ordered.Add(g);
+        }
+
+        links.Clear();
+        foreach (var g in ordered)
+        {
+            links.Add((g.Name, g.Args));
+            if (g.Options.Count <= 1)
+            {
+                links.AddRange(g.Options);
+                continue;
+            }
+
+            var sorted = g.Options.Select((opt, i) => (opt, i)).OrderBy(x => OptionRank(x.opt.Name)).ThenBy(x => x.i).Select(x => x.opt);
+            links.AddRange(sorted);
+        }
+    }
+
+    private static int OptionRank(string name)
+    {
+        var i = Array.IndexOf(OptionOrder, name);
+        return i >= 0 ? i : OptionOrder.Length;
     }
 
     private static int ContinuationIndent(string methodName, int stmtIndentCols, bool isLambdaParamRoot)
