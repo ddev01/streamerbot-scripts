@@ -30,6 +30,7 @@ internal static class FluentConfigLaravelFormatter
     {
         "Button",
         "ColorPicker",
+        "Combobox",
         "ConnectionStatus",
         "Dropdown",
         "DurationInput",
@@ -49,10 +50,12 @@ internal static class FluentConfigLaravelFormatter
         "Toggle",
         "WithRepeatableRows",
         "WithVisibility",
+        "WithVisibilityWhenNot",
         "WithVisibilityWhenOff",
     };
     private static readonly HashSet<string> OptionMethods = new(StringComparer.Ordinal)
     {
+        "AllowCustom",
         "AllowDuplicates",
         "Color",
         "Default",
@@ -62,6 +65,7 @@ internal static class FluentConfigLaravelFormatter
         "Hint",
         "ItemTemplate",
         "MaxSelected",
+        "Multiple",
         "Multiline",
         "OnClick",
         "OnPillAdded",
@@ -73,7 +77,9 @@ internal static class FluentConfigLaravelFormatter
         "Range",
         "Refresh",
         "RefreshPairs",
+        "Searchable",
         "ShowWhen",
+        "ShowWhenNot",
         "Size",
         "Span",
         "Step",
@@ -93,6 +99,9 @@ internal static class FluentConfigLaravelFormatter
         "WithStepper",
         "Options",
         "OptionsPairs",
+        "Searchable",
+        "AllowCustom",
+        "Multiple",
         "WithPairValue",
         "Preset",
         "Refresh",
@@ -115,6 +124,7 @@ internal static class FluentConfigLaravelFormatter
         "OnPillRemoved",
         "OnClick",
         "ShowWhen",
+        "ShowWhenNot",
     ];
     public static SyntaxNode Apply(SyntaxNode root)
     {
