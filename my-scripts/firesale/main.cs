@@ -25,8 +25,8 @@ public class CPHInline
         public string DefaultDuration { get; set; } = "permanent";
         public string TimerId { get; set; } = "";
         public bool ReplaceIfActive { get; set; }
-        public string IncludeGroups { get; set; } = "";
-        public string ExcludeGroups { get; set; } = "";
+        public string[] IncludeGroups { get; set; } = new string[0];
+        public string[] ExcludeGroups { get; set; } = new string[0];
         public bool SendMessage { get; set; } = true;
         public string MsgProcessing { get; set; } = "🔥 Fire sale activating! Updating {count} rewards ({mode})...";
         public string MsgStarted { get; set; } = "✅ Fire sale is ACTIVE! {mode} on {groups} ({count} rewards){duration}";
@@ -97,8 +97,8 @@ public class CPHInline
             if (string.IsNullOrWhiteSpace(x.DefaultDuration))
                 x.DefaultDuration = "permanent";
             x.TimerId = (x.TimerId ?? "").Trim();
-            x.IncludeGroups = (x.IncludeGroups ?? "").Trim();
-            x.ExcludeGroups = (x.ExcludeGroups ?? "").Trim();
+            x.IncludeGroups = NormalizeGroupArray(x.IncludeGroups);
+            x.ExcludeGroups = NormalizeGroupArray(x.ExcludeGroups);
         });
     }
 
@@ -311,33 +311,47 @@ public class CPHInline
         CPH.SetTimerInterval(settings.TimerId, seconds);
     }
 
-    private List<TwitchReward> FilterRewards(List<TwitchReward> rewards, string includeGroups, string excludeGroups)
+    private List<TwitchReward> FilterRewards(List<TwitchReward> rewards, string[] includeGroups, string[] excludeGroups)
     {
         var exclude = ParseGroupList(excludeGroups);
         var include = ParseGroupList(includeGroups);
         return rewards.Where(r => r != null && !string.IsNullOrWhiteSpace(r.Id)).Where(r => include.Count == 0 || include.Contains(NormalizeGroup(r.Group))).Where(r => exclude.Count == 0 || !exclude.Contains(NormalizeGroup(r.Group))).ToList();
     }
 
-    private static HashSet<string> ParseGroupList(string raw)
+    private static HashSet<string> ParseGroupList(string[] names)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(raw))
+        if (names == null)
             return set;
-        foreach (string part in raw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+        foreach (string raw in names)
         {
-            string name = part.Trim().ToLowerInvariant();
-            if (name.Length > 0 && name != "none" && name != "null")
-                set.Add(name);
+            if (string.IsNullOrWhiteSpace(raw))
+                continue;
+            foreach (string part in raw.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string name = part.Trim().ToLowerInvariant();
+                if (name.Length > 0 && name != "none" && name != "null")
+                    set.Add(name);
+            }
         }
 
         return set;
     }
 
-    private static string NormalizeGroup(string group) => (group ?? "").Trim().ToLowerInvariant();
-    private static string GroupsLabel(string includeGroups)
+    private static string[] NormalizeGroupArray(string[] names)
     {
-        string trimmed = (includeGroups ?? "").Trim();
-        return string.IsNullOrEmpty(trimmed) ? "all rewards" : trimmed;
+        var list = new List<string>();
+        foreach (string name in ParseGroupList(names))
+            list.Add(name);
+        return list.ToArray();
+    }
+
+    private static string NormalizeGroup(string group) => (group ?? "").Trim().ToLowerInvariant();
+    private static string GroupsLabel(string[] includeGroups)
+    {
+        if (includeGroups == null || includeGroups.Length == 0)
+            return "all rewards";
+        return string.Join(", ", includeGroups);
     }
 
     private int RestoreOriginalCosts(SaleState state, ExtensionLogger log)
