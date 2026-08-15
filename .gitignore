@@ -53,3 +53,4 @@ docs/fluentconfig-examples/
 !.vscode/settings.json
 !.vscode/extensions.json
 .tmp/
+.vscode/settings.json
