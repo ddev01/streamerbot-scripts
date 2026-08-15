@@ -44,13 +44,14 @@ Local `SbFormat` / Ctrl+S keeps FluentConfig chains in this Laravel layout. Stre
 
 ## Controls
 
-On `SectionBuilder` / `PanelBuilder`: Toggle, Textbox, Slider, Dropdown, NumberInput, IntegerInput,
+On `SectionBuilder` / `PanelBuilder`: Toggle, Textbox, Slider, Dropdown, Combobox, NumberInput, IntegerInput,
 DurationInput, Filepath, ColorPicker, DynamicTextboxes, PillInput, Button, ConnectionStatus,
-Intro, Title, Separator, WithVisibility / WithVisibilityWhenOff, WithRepeatableRows,
+Intro, Title, Separator, WithVisibility / WithVisibilityWhenOff / WithVisibilityWhenNot, WithRepeatableRows,
 Grid, Row, RepeatFor.
 
 Chain options from `IControlOptions`: `.Hint()`, `.Default(...)`, `.Range()`, `.Password()`,
-`.Options(...)`, `.OnClick(...)`, `.ItemTemplate(...)`, `.Size(...)` (Tailwind classes), etc.
+`.Options(...)`, `.Searchable()`, `.AllowCustom()`, `.Multiple()`, `.OnClick(...)`, `.ItemTemplate(...)`,
+`.Size(...)` (Tailwind classes), etc.
 There is **no** `.Span()` / `.Width()` — use `.Size("col-span-2")` / `.Size("w-1/2")`.
 
 ## Pills
@@ -73,6 +74,23 @@ Do **not** use WPF `Panel` / `StackPanel` in pill callbacks — schema sub-build
 .WithVisibilityWhenOff("premium_mode", inner => inner.Textbox("Free", "free_tier"))
 ```
 
+Value-equals (dropdown / any saved value — not a numeric comparator). Invert is a **named method**, not a trailing bool:
+
+```csharp
+.Dropdown("Mode", "default_mode").Options(new[] { "discount", "random", "free" })
+.NumberInput("Multiplier", "multiplier").ShowWhen("default_mode", "discount")
+.WithVisibility("default_mode", "random", inner => inner
+    .Grid("grid-cols-2 items-center", g => g
+        .NumberInput("Random min", "random_min")
+        .NumberInput("Random max", "random_max")))
+.ShowWhenNot("default_mode", "free")
+.WithVisibilityWhenNot("default_mode", "free", inner => inner.Textbox("Paid", "paid_note"))
+```
+
+Do **not** nest `Comparator.GreaterOrEqual` + `LessOrEqual` to fake equality. There is no `Comparator.Equal`.
+Value-equals / comparator groups are visually **flat** (no extra left rail). Toggle groups keep the indent rail.
+Rare escape hatch: last arg `VisibilityChrome.Indented` (not a `bool`).
+
 Numeric comparators (live, no remount):
 
 ```csharp
@@ -84,6 +102,34 @@ Numeric comparators (live, no remount):
 ```
 
 `Comparator`: `GreaterOrEqual`, `LessOrEqual`, `GreaterThan`, `LessThan` (wire: `gte`/`lte`/`gt`/`lt`).
+
+Upstream: `F:\Dev\SB-FluentConfig\docs\guides\VISIBILITY.md`, tutorial `04_ConditionalVisibility.cs`.
+
+## Dropdown / combobox
+
+`.Searchable()` filters as the user types. `.AllowCustom()` commits values not in the list (kept across Refresh).
+`.Multiple()` stores `string[]` — incompatible with `.WithPairValue()`. `.Combobox(label, key)` is a dropdown with searchable on.
+`.Default(string)` works on single dropdowns; `.Default(string[])` is for `.Multiple()` (otherwise seeds `[]`).
+
+```csharp
+.Combobox("Auto-end timer", "timer_id")
+    .AllowCustom()
+    .RefreshPairs(() => new[] { ("timer-a", "Timer A"), ("timer-b", "Timer B") })
+
+.Dropdown("Include groups", "include_groups")
+    .Searchable()
+    .Multiple()
+    .AllowCustom()
+    .Refresh(() => Fc.TwitchRewardGroups(CPH))
+```
+
+Refresh callbacks are **author-supplied**. There is **no** `Fc.ListTimers` / `CPH.GetTimers()` — Streamer.bot only has Enable/Disable/interval/state. Pass your own list into `.Refresh` / `.RefreshPairs`.
+
+`Fc.TwitchRewardGroups(CPH)` returns distinct trimmed group names from `CPH.TwitchGetRewards()` (never null).
+
+## DurationInput
+
+`.WithPermanentOption(true)` shows a Permanent checkbox. When checked, the amount and unit controls are **hidden** (not merely disabled); the saved value is `"permanent"`. Unchecking restores a real duration (`amount || 30` + last unit).
 
 ## Dynamic field count (RepeatFor)
 
@@ -156,6 +202,7 @@ Use `Fc.SettingsKeyFor(title)` / `Fc.SlugFor(title)` — do **not** use a `Fluen
 | Runtime state (not the menu) | `Fc.LoadData<T>` / `Fc.SaveData` / `GetData` / `SetData` → `{slug}_data` |
 | Event args + chat templates | `Fc.CaptureEvent(CPH)` / `Fc.ApplyTemplate(...)` |
 | Structured logs | `Fc.Logger(CPH, title, version)` → `Init` / `Info` / `Warn` / `Error` / `Failed` |
+| Reward group names | `Fc.TwitchRewardGroups(CPH)` |
 | Button `OnClick` | `UiContext.Pending<T>(saveKey)` |
 | Pill add/remove | `CallbackContext` helpers |
 

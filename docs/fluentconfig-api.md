@@ -1,12 +1,12 @@
 # FluentConfig API Reference (generated)
 
 Source: `F:\Dev\SB-FluentConfig\FluentConfig\Host\bin\Debug\net481\FluentConfig.dll`
-Generated: 2026-08-13
+Generated: 2026-08-15
 Author source/docs: `F:\Dev\SB-FluentConfig`
 
 Authoring surface only. Prefer `Fc.*` in action scripts. Control factories are on `SectionBuilder` / `PanelBuilder`; option methods chain via `IControlOptions`.
 Layout: `Grid`/`Row`/`Size` use 1:1 Tailwind class names (see [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\LAYOUT.md`).
-Runtime helpers (`LoadSettings`/`SetSetting`/`LoadData`/`Logger`/`CaptureEvent`/`ApplyTemplate`): [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\DIALOGS_AND_RUNTIME_VALUES.md`.
+Runtime helpers (`LoadSettings`/`SetSetting`/`LoadData`/`Logger`/`CaptureEvent`/`ApplyTemplate`/`TwitchRewardGroups`): [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\DIALOGS_AND_RUNTIME_VALUES.md`.
 Usage patterns: [fluentconfig-guide.md](fluentconfig-guide.md).
 
 ## class FluentConfig.FluentConfigUi
@@ -37,6 +37,7 @@ static string GetVersion()
 static string KeyFor(string title, string suffix)
 static string SettingsKeyFor(string title)
 static string SlugFor(string title)
+static string[] TwitchRewardGroups(IInlineInvokeProxy cph)
 static T LoadData(IInlineInvokeProxy cph, string title, Action<T> validate = ...)
 static T LoadSettings(IInlineInvokeProxy cph, string title, Action<T> validate = ...)
 static TValue GetData(IInlineInvokeProxy cph, string title, string jsonPath, TValue defaultValue = ...)
@@ -65,6 +66,7 @@ static string GetVersion()
 static string KeyFor(string title, string suffix)
 static string SettingsKeyFor(string title)
 static string SlugFor(string title)
+static string[] TwitchRewardGroups(IInlineInvokeProxy cph)
 static T LoadData(IInlineInvokeProxy cph, string title, Action<T> validate = ...)
 static T LoadSettings(IInlineInvokeProxy cph, string title, Action<T> validate = ...)
 static TValue GetData(IInlineInvokeProxy cph, string title, string jsonPath, TValue defaultValue = ...)
@@ -91,10 +93,15 @@ SectionBuilder Title(string text)
 SectionBuilder WithRepeatableRows(string saveKey, Action<PanelBuilder> buildRow)
 SectionBuilder WithVisibility(string key, Comparator op, int value, Action<PanelBuilder> build)
 SectionBuilder WithVisibility(string key, Comparator op, string compareKey, Action<PanelBuilder> build)
+SectionBuilder WithVisibility(string key, int equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
+SectionBuilder WithVisibility(string key, string equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
 SectionBuilder WithVisibility(string toggleKey, Action<PanelBuilder> build, bool inverted = ...)
+SectionBuilder WithVisibilityWhenNot(string key, int equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
+SectionBuilder WithVisibilityWhenNot(string key, string equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
 SectionBuilder WithVisibilityWhenOff(string toggleKey, Action<PanelBuilder> build)
 SectionFluentWrapper Button(string label)
 SectionFluentWrapper ColorPicker(string label, string key)
+SectionFluentWrapper Combobox(string label, string key)
 SectionFluentWrapper Dropdown(string label, string key)
 SectionFluentWrapper DurationInput(string label, string key)
 SectionFluentWrapper DynamicTextboxes(string label, string key)
@@ -121,10 +128,15 @@ PanelBuilder Title(string text)
 PanelBuilder WithRepeatableRows(string saveKey, Action<PanelBuilder> buildRow)
 PanelBuilder WithVisibility(string key, Comparator op, int value, Action<PanelBuilder> build)
 PanelBuilder WithVisibility(string key, Comparator op, string compareKey, Action<PanelBuilder> build)
+PanelBuilder WithVisibility(string key, int equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
+PanelBuilder WithVisibility(string key, string equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
 PanelBuilder WithVisibility(string toggleKey, Action<PanelBuilder> build, bool inverted = ...)
+PanelBuilder WithVisibilityWhenNot(string key, int equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
+PanelBuilder WithVisibilityWhenNot(string key, string equalsValue, Action<PanelBuilder> build, VisibilityChrome chrome = ...)
 PanelBuilder WithVisibilityWhenOff(string toggleKey, Action<PanelBuilder> build)
 PanelFluentWrapper Button(string label)
 PanelFluentWrapper ColorPicker(string label, string key)
+PanelFluentWrapper Combobox(string label, string key)
 PanelFluentWrapper Dropdown(string label, string key)
 PanelFluentWrapper DurationInput(string label, string key)
 PanelFluentWrapper DynamicTextboxes(string label, string key)
@@ -140,12 +152,14 @@ PanelFluentWrapper Toggle(string label, string key)
 ## interface FluentConfig.IControlOptions
 
 ```csharp
+void AllowCustom()
 void AllowDuplicates(bool value)
 void Color(string hex)
 void Default(bool value)
 void Default(double value)
 void Default(int value)
 void Default(string value)
+void Default(string[] values)
 void DefaultByValue(string value)
 void DefaultIndex(int index)
 void DefaultIndices(int[] indices)
@@ -153,6 +167,7 @@ void Hint(string text)
 void ItemTemplate(Action<PanelBuilder> build)
 void MaxSelected(int n)
 void Multiline()
+void Multiple()
 void OnClick(Action<UiContext> callback)
 void OnPillAdded(Action<string, CallbackContext> callback)
 void OnPillRemoved(Action<string, CallbackContext> callback)
@@ -164,9 +179,14 @@ void Range(double min, double max)
 void Range(int min, int max)
 void Refresh(Func<string[]> callback)
 void RefreshPairs(Func<IEnumerable<ValueTuple<string, string>>> callback)
+void Searchable()
 void ShowWhen(string key)
 void ShowWhen(string key, Comparator op, int value)
 void ShowWhen(string key, Comparator op, string compareKey)
+void ShowWhen(string key, int equalsValue)
+void ShowWhen(string key, string equalsValue)
+void ShowWhenNot(string key, int equalsValue)
+void ShowWhenNot(string key, string equalsValue)
 void Size(string spec)
 void Step(double value)
 void Text(string caption)
@@ -183,6 +203,13 @@ GreaterOrEqual
 GreaterThan
 LessOrEqual
 LessThan
+```
+
+## enum FluentConfig.VisibilityChrome
+
+```csharp
+Flat
+Indented
 ```
 
 ## class FluentConfig.UiContext

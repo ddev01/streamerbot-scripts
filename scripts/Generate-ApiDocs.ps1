@@ -1,5 +1,5 @@
 # Regenerates docs/cph-api.md and docs/fluentconfig-api.md from local DLLs.
-# FluentConfig surface includes Fc runtime helpers, Grid/Row/RepeatFor/Size, Comparator, and Runtime.* types.
+# FluentConfig surface includes Fc runtime helpers, Grid/Row/RepeatFor/Size, Comparator, VisibilityChrome, and Runtime.* types.
 # After rebuilding FluentConfig.dll, pass -FluentConfigDll to the new build (or redeploy into Streamer.bot dlls/).
 param(
   [string]$StreamerBotPath = $env:STREAMERBOT_PATH,
@@ -174,6 +174,7 @@ $authorTypes = @(
   @{ Name = 'FluentConfig.PanelBuilder'; DeclaredOnly = $false },
   @{ Name = 'FluentConfig.IControlOptions'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.Comparator'; DeclaredOnly = $true },
+  @{ Name = 'FluentConfig.VisibilityChrome'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.UiContext'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.CallbackContext'; DeclaredOnly = $true },
   @{ Name = 'FluentConfig.KnownBots'; DeclaredOnly = $true },
@@ -193,7 +194,7 @@ $fb = New-Object System.Text.StringBuilder
 [void]$fb.AppendLine('')
 [void]$fb.AppendLine('Authoring surface only. Prefer `Fc.*` in action scripts. Control factories are on `SectionBuilder` / `PanelBuilder`; option methods chain via `IControlOptions`.')
 [void]$fb.AppendLine('Layout: `Grid`/`Row`/`Size` use 1:1 Tailwind class names (see [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\LAYOUT.md`).')
-[void]$fb.AppendLine('Runtime helpers (`LoadSettings`/`SetSetting`/`LoadData`/`Logger`/`CaptureEvent`/`ApplyTemplate`): [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\DIALOGS_AND_RUNTIME_VALUES.md`.')
+[void]$fb.AppendLine('Runtime helpers (`LoadSettings`/`SetSetting`/`LoadData`/`Logger`/`CaptureEvent`/`ApplyTemplate`/`TwitchRewardGroups`): [fluentconfig-guide.md](fluentconfig-guide.md) and `F:\Dev\SB-FluentConfig\docs\guides\DIALOGS_AND_RUNTIME_VALUES.md`.')
 [void]$fb.AppendLine('Usage patterns: [fluentconfig-guide.md](fluentconfig-guide.md).')
 [void]$fb.AppendLine('')
 

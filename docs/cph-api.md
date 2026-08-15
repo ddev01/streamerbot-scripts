@@ -1,7 +1,7 @@
 # CPH API Reference (generated)
 
 Source: `Streamer.bot.Plugin.Interface.dll` under `F:\Stream\Streamer.bot-x64-1.0.7`
-Generated: 2026-08-13
+Generated: 2026-08-15
 
 In Streamer.bot C# actions, `CPH` is an `IInlineInvokeProxy` instance on `CPHInlineBase`.
 Prefer this file over guessing method names/signatures.
