@@ -1,0 +1,1115 @@
+using FluentConfig;
+using FluentConfig.Runtime;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Security;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Windows.Forms;
+
+// Refs: System, System.Core, System.Net.Http, System.Windows.Forms, Newtonsoft.Json.dll, FluentConfig.dll (Streamer.bot dlls/).
+#if EXTERNAL_EDITOR
+public class TtsMain : CPHInlineBase
+#else
+public class CPHInline
+#endif
+{
+    private const string Title = "TTS";
+    private const string Version = "1.0.0";
+    private const string OwnedVar = "tts_owned";
+    private const string StickyVar = "tts_sticky";
+    private const string LastMsVar = "tts_last_ms";
+    private const string FallbackAzureVoice = "en-US-AriaNeural";
+    private static readonly HttpClient Http = new HttpClient
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+    private static readonly Regex UrlLike = new Regex(@"(https?:\/\/|www\.)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly string[] LoggerSecrets =
+    {
+        "azure_key",
+        "azure_key2"
+    };
+    public bool Execute()
+    {
+        return DoSpeak();
+    }
+
+    public bool TtsSpeak() => DoSpeak();
+    public bool TtsUnlock() => DoUnlock();
+    public bool TtsCommand() => DoCommand();
+#region Settings
+    private sealed class VoiceInfo
+    {
+        public string Alias;
+        public string Display;
+        public string AzureId;
+        public string[] Styles;
+    }
+
+    private sealed class Settings
+    {
+        public string AzureKey { get; set; } = "";
+        public string AzureKey2 { get; set; } = "";
+        public string Region { get; set; } = "northeurope";
+        public int Volume { get; set; } = 100;
+        public string SpeakRewardId { get; set; } = "";
+        public string UnlockRewardId { get; set; } = "";
+        public int CooldownSeconds { get; set; } = 30;
+        public int MaxChars { get; set; } = 250;
+        public bool BlockUrls { get; set; } = true;
+        public string DefaultVoice { get; set; } = "en";
+        public string[] Voices { get; set; } = Array.Empty<string>();
+        public List<VoiceInfo> Catalog { get; set; } = new List<VoiceInfo>();
+        public string MsgHelp { get; set; } = "@{user} Redeem TTS Message to speak (default English). Prefix a voice you own: {prefix}hello. Unlock voices with Unlock TTS Voice. !tts voices | !tts set <alias>";
+        public string MsgCooldown { get; set; } = "@{user} TTS cooldown: {seconds}s left.";
+        public string MsgPaused { get; set; } = "@{user} TTS is paused right now.";
+        public string MsgUnpaid { get; set; } = "@{user} You don't own {alias}. Unlock it with Unlock TTS Voice.";
+        public string MsgUnknownPrefix { get; set; } = "@{user} Unknown voice '{prefix}'. Unlock names: {voices}.";
+        public string MsgUnknownStyle { get; set; } = "@{user} {alias} styles: {styles}.";
+        public string MsgEmpty { get; set; } = "@{user} Type a message after the prefix.";
+        public string MsgTooLong { get; set; } = "@{user} TTS is too long (max {max} characters).";
+        public string MsgUrl { get; set; } = "@{user} Links are not allowed in TTS.";
+        public string MsgUnlockOk { get; set; } = "@{user} unlocked {alias}. Styles: {styles}. TTS prefix: {prefix}hello (or {prefix}angry hello if that style exists). Sticky: !tts set {alias}";
+        public string MsgUnlockOwned { get; set; } = "@{user} You already own {alias}.";
+        public string MsgUnlockUnknown { get; set; } = "@{user} Unknown voice. Try: {voices}";
+        public string MsgSetOk { get; set; } = "@{user} Default TTS voice is now {alias}.";
+        public string MsgSetNeedOwn { get; set; } = "@{user} Unlock {alias} first, or use !tts set default.";
+        public string MsgNeedMod { get; set; } = "@{user} Mods only.";
+        public string MsgOff { get; set; } = "TTS rewards paused.";
+        public string MsgOn { get; set; } = "TTS rewards are live.";
+        public string MsgSpeakRewardOnly { get; set; } = "@{user} Speak with the TTS Message reward, not !tts. Try !tts for help.";
+        public string MsgSynthFail { get; set; } = "@{user} TTS failed to play. Try again in a bit.";
+    }
+
+    private sealed class PauseState
+    {
+        public bool Paused { get; set; }
+    }
+
+    private sealed class PrefixParse
+    {
+        public VoiceInfo Voice;
+        public string Style;
+        public string Message;
+        public string RawPrefix;
+        public string ErrorKey;
+    }
+
+    private Settings LoadSettings()
+    {
+        var s = Fc.LoadSettings<Settings>(CPH, Title, x =>
+        {
+            if (string.IsNullOrWhiteSpace(x.Region))
+                x.Region = "northeurope";
+            else
+                x.Region = x.Region.Trim();
+            x.Volume = Clamp(x.Volume, 0, 100);
+            x.CooldownSeconds = Clamp(x.CooldownSeconds, 0, 3600);
+            x.MaxChars = Clamp(x.MaxChars, 1, 2000);
+            if (string.IsNullOrWhiteSpace(x.DefaultVoice))
+                x.DefaultVoice = "";
+            else
+                x.DefaultVoice = x.DefaultVoice.Trim();
+        });
+        var aliases = s.Voices ?? Array.Empty<string>();
+        s.Catalog = new List<VoiceInfo>();
+        foreach (var raw in aliases)
+        {
+            string alias = (raw ?? "").Trim();
+            if (alias.Length == 0)
+                continue;
+            string display = Fc.GetSetting(CPH, Title, alias + "_display", alias);
+            string azure = Fc.GetSetting(CPH, Title, alias + "_azure", "");
+            string stylesRaw = Fc.GetSetting(CPH, Title, alias + "_styles", "");
+            s.Catalog.Add(new VoiceInfo { Alias = alias, Display = string.IsNullOrWhiteSpace(display) ? alias : display.Trim(), AzureId = (azure ?? "").Trim(), Styles = ParseStyles(stylesRaw), });
+        }
+
+        if (s.Catalog.Count == 0)
+        {
+            s.Catalog.Add(new VoiceInfo
+            {
+                Alias = "en",
+                Display = "English",
+                AzureId = FallbackAzureVoice,
+                Styles = Array.Empty<string>(),
+            });
+            s.DefaultVoice = "en";
+        }
+        else if (FindVoice(s, s.DefaultVoice) == null)
+        {
+            s.DefaultVoice = s.Catalog[0].Alias;
+        }
+
+        var def = FindVoice(s, s.DefaultVoice);
+        if (def != null && string.IsNullOrWhiteSpace(def.AzureId))
+            def.AzureId = FallbackAzureVoice;
+        s.Volume = Clamp(Fc.GetSetting(CPH, Title, "volume", s.Volume), 0, 100);
+        return s;
+    }
+
+    private static string[] ParseStyles(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return Array.Empty<string>();
+        return raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToArray();
+    }
+
+#endregion
+#region Speak
+    private bool DoSpeak()
+    {
+        var log = Fc.Logger(CPH, Title, Version, LoggerSecrets);
+        if (!EnsureReady(log, isRedemption: true, needAzure: true))
+            return false;
+        var settings = LoadSettings();
+        var ev = Fc.CaptureEvent(CPH);
+        string user = MentionName(ev);
+        string userId = ev.UserId;
+        TryGetRedemptionIds(out var rewardId, out var redemptionId);
+        if (!IsSpeakRedemption(settings, rewardId))
+        {
+            log.Info("Speak skipped; this redemption is the unlock reward.");
+            return true;
+        }
+
+        string input = GetRewardInput(ev);
+        log.Info("Speak user=" + user + " chars=" + (input ?? "").Length);
+        if (IsPaused())
+            return Refund(rewardId, redemptionId, settings.MsgPaused, user, settings, log, "paused");
+        int wait = CooldownRemainingSeconds(userId, settings.CooldownSeconds);
+        if (wait > 0)
+        {
+            return Refund(rewardId, redemptionId, settings.MsgCooldown, user, settings, log, "cooldown", new Dictionary<string, string> { ["seconds"] = wait.ToString(CultureInfo.InvariantCulture) });
+        }
+
+        var parsed = ParsePrefix(input, userId, settings);
+        if (parsed.ErrorKey != null)
+        {
+            string template = TemplateFor(settings, parsed.ErrorKey);
+            var extra = VarsFromParse(parsed, settings);
+            return Refund(rewardId, redemptionId, template, user, settings, log, parsed.ErrorKey, extra);
+        }
+
+        string spam = CheckMessage(parsed.Message, settings);
+        if (spam != null)
+        {
+            string template = TemplateFor(settings, spam);
+            return Refund(rewardId, redemptionId, template, user, settings, log, spam, VarsFromParse(parsed, settings));
+        }
+
+        var keys = AzureKeys(settings);
+        if (keys.Count == 0 || string.IsNullOrWhiteSpace(parsed.Voice.AzureId))
+        {
+            FailSetup("TTS is missing an Azure key or a voice ID. Open TTS Settings, paste the Speech key, check each voice's Azure ID, and Save.", "@" + user + " TTS isn't configured yet. Points refunded.", log, true, rewardId, redemptionId);
+            return false;
+        }
+
+        Fulfill(rewardId, redemptionId);
+        bool ok = SynthesizeAndPlay(settings, keys, parsed.Voice.AzureId, parsed.Style, parsed.Message, log);
+        if (!ok)
+        {
+            Chat(settings.MsgSynthFail, user, ev, settings, VarsFromParse(parsed, settings));
+            return false;
+        }
+
+        SetLastSpeakMs(userId, UnixMs());
+        log.Info($"{user} TTS alias={parsed.Voice.Alias} style={parsed.Style ?? "-"} chars={parsed.Message.Length}");
+        return true;
+    }
+
+#endregion
+#region Unlock
+    private bool DoUnlock()
+    {
+        var log = Fc.Logger(CPH, Title, Version, LoggerSecrets);
+        if (!EnsureReady(log, isRedemption: true, needAzure: false))
+            return false;
+        var settings = LoadSettings();
+        var ev = Fc.CaptureEvent(CPH);
+        string user = MentionName(ev);
+        string userId = ev.UserId;
+        TryGetRedemptionIds(out var rewardId, out var redemptionId);
+        if (!IsUnlockRedemption(settings, rewardId))
+        {
+            log.Info("Unlock skipped; this redemption is not the unlock reward.");
+            return true;
+        }
+
+        string input = GetRewardInput(ev);
+        if (IsPaused())
+            return Refund(rewardId, redemptionId, settings.MsgPaused, user, settings, log, "paused");
+        var voice = FindVoice(settings, input);
+        if (voice == null)
+        {
+            return Refund(rewardId, redemptionId, settings.MsgUnlockUnknown, user, settings, log, "unlock-unknown");
+        }
+
+        var owned = GetOwned(userId);
+        if (Owns(owned, voice.Alias))
+        {
+            return Refund(rewardId, redemptionId, settings.MsgUnlockOwned, user, settings, log, "unlock-owned", VarsForVoice(voice, settings));
+        }
+
+        owned.Add(voice.Alias);
+        SetOwned(userId, owned);
+        Fulfill(rewardId, redemptionId);
+        Chat(settings.MsgUnlockOk, user, ev, settings, VarsForVoice(voice, settings));
+        log.Info($"{user} unlocked {voice.Alias}");
+        return true;
+    }
+
+#endregion
+#region Command
+    private bool DoCommand()
+    {
+        var log = Fc.Logger(CPH, Title, Version, LoggerSecrets);
+        if (!EnsureReady(log, isRedemption: false, needAzure: false))
+            return false;
+        var settings = LoadSettings();
+        var ev = Fc.CaptureEvent(CPH);
+        string user = MentionName(ev);
+        string leftover = (ev.RawInput ?? "").Trim();
+        if (leftover.Length == 0)
+        {
+            Chat(settings.MsgHelp, user, ev, settings, HelpVars(settings));
+            return true;
+        }
+
+        var tokens = leftover.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        string head = tokens[0];
+        if (Eq(head, "help"))
+        {
+            Chat(settings.MsgHelp, user, ev, settings, HelpVars(settings));
+            return true;
+        }
+
+        if (Eq(head, "voices") || Eq(head, "inventory"))
+        {
+            ReplyVoices(user, ev.UserId, ev, settings);
+            return true;
+        }
+
+        if (Eq(head, "off") || Eq(head, "pause"))
+        {
+            if (!IsModOrBroadcaster(ev))
+            {
+                Chat(settings.MsgNeedMod, user, ev, settings, null);
+                return true;
+            }
+
+            SetPaused(true, settings, log);
+            Chat(settings.MsgOff, user, ev, settings, null);
+            return true;
+        }
+
+        if (Eq(head, "on") || Eq(head, "unpause"))
+        {
+            if (!IsModOrBroadcaster(ev))
+            {
+                Chat(settings.MsgNeedMod, user, ev, settings, null);
+                return true;
+            }
+
+            SetPaused(false, settings, log);
+            Chat(settings.MsgOn, user, ev, settings, null);
+            return true;
+        }
+
+        if (Eq(head, "set") || Eq(head, "voice"))
+        {
+            int i = 1;
+            if (i < tokens.Length && Eq(head, "set") && Eq(tokens[i], "voice"))
+                i++;
+            string want = i < tokens.Length ? string.Join(" ", tokens.Skip(i)) : "";
+            HandleSetVoice(user, ev.UserId, ev, settings, want);
+            return true;
+        }
+
+        Chat(settings.MsgSpeakRewardOnly, user, ev, settings, null);
+        return true;
+    }
+
+    private void HandleSetVoice(string user, string userId, EventContext ev, Settings settings, string want)
+    {
+        if (string.IsNullOrWhiteSpace(want) || Eq(want, "default") || Eq(want, settings.DefaultVoice))
+        {
+            CPH.SetTwitchUserVarById(userId, StickyVar, "", true);
+            var def = FindVoice(settings, settings.DefaultVoice);
+            Chat(settings.MsgSetOk, user, ev, settings, VarsForVoice(def, settings));
+            return;
+        }
+
+        var voice = FindVoice(settings, want);
+        if (voice == null)
+        {
+            Chat(settings.MsgUnlockUnknown, user, ev, settings, null);
+            return;
+        }
+
+        if (Eq(voice.Alias, settings.DefaultVoice))
+        {
+            CPH.SetTwitchUserVarById(userId, StickyVar, "", true);
+            Chat(settings.MsgSetOk, user, ev, settings, VarsForVoice(voice, settings));
+            return;
+        }
+
+        if (!Owns(GetOwned(userId), voice.Alias))
+        {
+            Chat(settings.MsgSetNeedOwn, user, ev, settings, VarsForVoice(voice, settings));
+            return;
+        }
+
+        CPH.SetTwitchUserVarById(userId, StickyVar, voice.Alias, true);
+        Chat(settings.MsgSetOk, user, ev, settings, VarsForVoice(voice, settings));
+    }
+
+    private void ReplyVoices(string user, string userId, EventContext ev, Settings settings)
+    {
+        var owned = GetOwned(userId);
+        string sticky = GetStickyAlias(userId, settings);
+        var ownedBits = settings.Catalog.Where(v => Owns(owned, v.Alias) || Eq(v.Alias, settings.DefaultVoice)).Select(v =>
+        {
+            string mark = Eq(v.Alias, sticky) ? "*" : "";
+            string styles = v.Styles.Length == 0 ? "no styles" : string.Join(", ", v.Styles);
+            string free = Eq(v.Alias, settings.DefaultVoice) && !Owns(owned, v.Alias) ? "free, unlock for styles" : styles;
+            return $"{v.Alias}{mark} ({free})";
+        });
+        string buyable = string.Join(", ", settings.Catalog.Select(v => $"{v.Display}={v.Alias}"));
+        string ownedText = string.Join(" | ", ownedBits);
+        if (string.IsNullOrWhiteSpace(ownedText))
+            ownedText = "(none)";
+        string line = $"@{user} Voices: {ownedText}. Buy: {buyable}. Sticky *: !tts set <alias>. Prefix: {settings.Catalog[0].Alias}:hello";
+        Reply(line, ev);
+    }
+
+#endregion
+#region Prefix
+    private PrefixParse ParsePrefix(string input, string userId, Settings settings)
+    {
+        var result = new PrefixParse();
+        string text = (input ?? "").Trim();
+        if (text.Length == 0)
+        {
+            result.ErrorKey = "empty";
+            return result;
+        }
+
+        int space = text.IndexOf(' ');
+        string token = space < 0 ? text : text.Substring(0, space);
+        bool hasColon = token.IndexOf(':') >= 0;
+        if (!hasColon)
+        {
+            result.Voice = ResolveStickyOrDefault(userId, settings);
+            result.Message = text;
+            if (!CanUseVoice(userId, result.Voice, null, settings))
+            {
+                result.ErrorKey = "unpaid";
+                result.RawPrefix = result.Voice.Alias;
+            }
+
+            return result;
+        }
+
+        string message = space < 0 ? "" : text.Substring(space + 1).Trim();
+        result.Message = message;
+        result.RawPrefix = token;
+        string left;
+        string stylePart;
+        int colon = token.IndexOf(':');
+        left = token.Substring(0, colon).Trim();
+        stylePart = token.Substring(colon + 1).Trim();
+        if (left.Length > 0)
+        {
+            var byAlias = FindVoice(settings, left);
+            if (byAlias != null)
+            {
+                result.Voice = byAlias;
+                result.Style = stylePart.Length == 0 ? null : stylePart;
+            }
+        }
+
+        if (result.Voice == null)
+        {
+            // Style-only: angry:
+            string styleName = left.Length > 0 ? left : stylePart;
+            var sticky = ResolveStickyOrDefault(userId, settings);
+            if (!string.IsNullOrEmpty(styleName) && HasStyle(sticky, styleName))
+            {
+                result.Voice = sticky;
+                result.Style = styleName;
+            }
+            else
+            {
+                result.ErrorKey = "unknown_prefix";
+                return result;
+            }
+        }
+
+        if (!CanUseVoice(userId, result.Voice, result.Style, settings))
+        {
+            result.ErrorKey = "unpaid";
+            return result;
+        }
+
+        if (!string.IsNullOrEmpty(result.Style) && !HasStyle(result.Voice, result.Style))
+        {
+            result.ErrorKey = "unknown_style";
+            return result;
+        }
+
+        if (string.IsNullOrWhiteSpace(result.Message))
+            result.ErrorKey = "empty";
+        return result;
+    }
+
+    private VoiceInfo ResolveStickyOrDefault(string userId, Settings settings)
+    {
+        string sticky = GetStickyAlias(userId, settings);
+        return FindVoice(settings, sticky) ?? FindVoice(settings, settings.DefaultVoice) ?? settings.Catalog[0];
+    }
+
+    private bool CanUseVoice(string userId, VoiceInfo voice, string style, Settings settings)
+    {
+        if (voice == null)
+            return false;
+        bool isDefault = Eq(voice.Alias, settings.DefaultVoice);
+        bool needsOwn = !isDefault || !string.IsNullOrEmpty(style);
+        if (!needsOwn)
+            return true;
+        return Owns(GetOwned(userId), voice.Alias);
+    }
+
+    private static bool HasStyle(VoiceInfo voice, string style)
+    {
+        if (voice == null || string.IsNullOrWhiteSpace(style))
+            return false;
+        return voice.Styles.Any(s => Eq(s, style));
+    }
+
+#endregion
+#region Azure
+    private bool SynthesizeAndPlay(Settings settings, List<string> keys, string azureVoice, string style, string text, ExtensionLogger log)
+    {
+        string path = null;
+        try
+        {
+            string locale = LocaleFromVoice(azureVoice);
+            string inner = XmlEscape(text);
+            if (!string.IsNullOrEmpty(style))
+            {
+                inner = "<mstts:express-as style=\"" + XmlEscape(style) + "\">" + inner + "</mstts:express-as>";
+            }
+
+            string ssml = "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" " + "xmlns:mstts=\"https://www.w3.org/2001/mstts\" xml:lang=\"" + locale + "\">" + "<voice name=\"" + XmlEscape(azureVoice) + "\">" + inner + "</voice></speak>";
+            string url = "https://" + settings.Region + ".tts.speech.microsoft.com/cognitiveservices/v1";
+            path = Path.Combine(Path.GetTempPath(), "sb-tts-" + Guid.NewGuid().ToString("N") + ".mp3");
+            bool downloaded = false;
+            foreach (string key in keys)
+            {
+                using (var req = new HttpRequestMessage(HttpMethod.Post, url))
+                {
+                    req.Headers.TryAddWithoutValidation("Ocp-Apim-Subscription-Key", key);
+                    req.Headers.TryAddWithoutValidation("User-Agent", "StreamerBotTts");
+                    req.Headers.TryAddWithoutValidation("X-Microsoft-OutputFormat", "audio-16khz-128kbitrate-mono-mp3");
+                    req.Content = new StringContent(ssml, Encoding.UTF8, "application/ssml+xml");
+                    using (var resp = Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+                    {
+                        if (!resp.IsSuccessStatusCode)
+                        {
+                            string err = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                            log.Error("Azure HTTP " + (int)resp.StatusCode + " " + Trim(err, 400));
+                            continue;
+                        }
+
+                        using (var src = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
+                        using (var dst = File.Create(path))
+                        {
+                            src.CopyTo(dst);
+                        }
+
+                        downloaded = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!downloaded)
+                return false;
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length <= 0)
+            {
+                log.Error("Azure returned empty audio.");
+                return false;
+            }
+
+            float vol = settings.Volume / 100f;
+            CPH.PlaySound(path, vol, true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex.GetType().Name + ": " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            TryDelete(path);
+        }
+    }
+
+    private static string LocaleFromVoice(string voice)
+    {
+        if (string.IsNullOrEmpty(voice))
+            return "en-US";
+        int dash = voice.IndexOf('-');
+        if (dash < 0)
+            return "en-US";
+        int dash2 = voice.IndexOf('-', dash + 1);
+        return dash2 > 0 ? voice.Substring(0, dash2) : "en-US";
+    }
+
+    private static string XmlEscape(string s)
+    {
+        return SecurityElement.Escape(s ?? "") ?? "";
+    }
+
+    private static string Trim(string s, int max)
+    {
+        if (string.IsNullOrEmpty(s))
+            return "";
+        s = s.Replace("\r", " ").Replace("\n", " ");
+        return s.Length <= max ? s : s.Substring(0, max) + "…";
+    }
+
+    private static void TryDelete(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return;
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        // ignore temp cleanup
+        }
+    }
+
+    private static List<string> AzureKeys(Settings s)
+    {
+        var keys = new List<string>();
+        void Add(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw) || raw.StartsWith("PASTE_", StringComparison.OrdinalIgnoreCase))
+                return;
+            string k = raw.Trim();
+            if (!keys.Contains(k, StringComparer.Ordinal))
+                keys.Add(k);
+        }
+
+        Add(s.AzureKey);
+        Add(s.AzureKey2);
+        return keys;
+    }
+
+#endregion
+#region Cooldown pause ownership
+    private bool IsPaused()
+    {
+        var state = Fc.LoadData<PauseState>(CPH, Title);
+        return state != null && state.Paused;
+    }
+
+    private void SetPaused(bool paused, Settings settings, ExtensionLogger log)
+    {
+        Fc.SaveData(CPH, Title, new PauseState { Paused = paused });
+        foreach (var id in new[]
+        {
+            settings.SpeakRewardId,
+            settings.UnlockRewardId
+        }
+
+        )
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                continue;
+            try
+            {
+                if (paused)
+                    CPH.PauseReward(id);
+                else
+                    CPH.UnPauseReward(id);
+            }
+            catch (Exception ex)
+            {
+                log.Warn("PauseReward " + id + ": " + ex.Message);
+            }
+        }
+    }
+
+    private int CooldownRemainingSeconds(string userId, int cooldownSeconds)
+    {
+        if (cooldownSeconds <= 0 || string.IsNullOrWhiteSpace(userId))
+            return 0;
+        string raw = CPH.GetTwitchUserVarById<string>(userId, LastMsVar, false);
+        if (string.IsNullOrWhiteSpace(raw) || !long.TryParse(raw, out long last) || last <= 0)
+            return 0;
+        long elapsed = UnixMs() - last;
+        long need = cooldownSeconds * 1000L;
+        if (elapsed >= need)
+            return 0;
+        long left = need - elapsed;
+        return (int)Math.Ceiling(left / 1000.0);
+    }
+
+    private void SetLastSpeakMs(string userId, long ms)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return;
+        CPH.SetTwitchUserVarById(userId, LastMsVar, ms.ToString(CultureInfo.InvariantCulture), false);
+    }
+
+    private List<string> GetOwned(string userId)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(userId))
+            return list;
+        try
+        {
+            string raw = CPH.GetTwitchUserVarById<string>(userId, OwnedVar, true);
+            if (string.IsNullOrWhiteSpace(raw))
+                return list;
+            var arr = JArray.Parse(raw);
+            foreach (var t in arr)
+            {
+                string a = (t?.ToString() ?? "").Trim();
+                if (a.Length > 0 && !list.Contains(a, StringComparer.OrdinalIgnoreCase))
+                    list.Add(a);
+            }
+        }
+        catch
+        {
+            return list;
+        }
+
+        return list;
+    }
+
+    private void SetOwned(string userId, List<string> owned)
+    {
+        var arr = new JArray(owned.Select(a => a));
+        CPH.SetTwitchUserVarById(userId, OwnedVar, arr.ToString(Newtonsoft.Json.Formatting.None), true);
+    }
+
+    private string GetStickyAlias(string userId, Settings settings)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return settings.DefaultVoice;
+        string raw = CPH.GetTwitchUserVarById<string>(userId, StickyVar, true);
+        if (string.IsNullOrWhiteSpace(raw))
+            return settings.DefaultVoice;
+        var v = FindVoice(settings, raw.Trim());
+        if (v == null)
+            return settings.DefaultVoice;
+        if (!Eq(v.Alias, settings.DefaultVoice) && !Owns(GetOwned(userId), v.Alias))
+            return settings.DefaultVoice;
+        return v.Alias;
+    }
+
+    private static bool Owns(List<string> owned, string alias)
+    {
+        if (owned == null || string.IsNullOrEmpty(alias))
+            return false;
+        return owned.Any(a => Eq(a, alias));
+    }
+
+#endregion
+#region Setup notice
+    private bool EnsureReady(ExtensionLogger log, bool isRedemption, bool needAzure)
+    {
+        var ev = Fc.CaptureEvent(CPH);
+        string user = MentionName(ev);
+        TryGetRedemptionIds(out var rewardId, out var redemptionId);
+        string chatFail = isRedemption ? (string.IsNullOrWhiteSpace(user) ? "TTS isn't set up yet. Points refunded." : "@" + user + " TTS isn't set up yet. Points refunded.") : (string.IsNullOrWhiteSpace(user) ? "TTS isn't set up yet." : "@" + user + " TTS isn't set up yet. The streamer still needs to open TTS Settings.");
+        if (!Fc.HasSavedSettings(CPH, Title))
+        {
+            FailSetup("TTS is not set up. Run the TTS Settings action, paste your Azure Speech key, pick the two rewards, and click Save.", chatFail, log, isRedemption, rewardId, redemptionId);
+            return false;
+        }
+
+        if (!needAzure || AzureKeys(LoadSettings()).Count > 0)
+            return true;
+        FailSetup("TTS has no Azure Speech key. Open TTS Settings, paste the key, and Save.", isRedemption ? (string.IsNullOrWhiteSpace(user) ? "TTS isn't configured yet. Points refunded." : "@" + user + " TTS isn't configured yet. Points refunded.") : chatFail, log, isRedemption, rewardId, redemptionId);
+        return false;
+    }
+
+    private void FailSetup(string streamerMessage, string chatMessage, ExtensionLogger log, bool popup, string rewardId, string redemptionId)
+    {
+        log.Warn(streamerMessage);
+        NotifyStreamer(streamerMessage, popup);
+        if (!string.IsNullOrWhiteSpace(rewardId) && !string.IsNullOrWhiteSpace(redemptionId))
+        {
+            try
+            {
+                CPH.TwitchRedemptionCancel(rewardId, redemptionId);
+            }
+            catch (Exception ex)
+            {
+                log.Warn("Cancel failed: " + ex.Message);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(chatMessage))
+            CPH.SendMessage(chatMessage);
+    }
+
+    private void NotifyStreamer(string message, bool popup)
+    {
+        try
+        {
+            CPH.ShowToastNotification("TTS", message);
+        }
+        catch
+        {
+            try
+            {
+                CPH.ShowToastNotification("TTS", message, "TTS", "");
+            }
+            catch
+            {
+            // toast optional
+            }
+        }
+
+        if (!popup)
+            return;
+        try
+        {
+            var t = new Thread(() =>
+            {
+                try
+                {
+                    MessageBox.Show(message, "TTS", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                catch
+                {
+                // ignore STA/dialog failures
+                }
+            });
+            t.SetApartmentState(ApartmentState.STA);
+            t.IsBackground = true;
+            t.Start();
+        }
+        catch
+        {
+        // ignore
+        }
+    }
+
+#endregion
+#region Redemption chat helpers
+    private bool Refund(string rewardId, string redemptionId, string template, string user, Settings settings, ExtensionLogger log, string reason, Dictionary<string, string> extra = null)
+    {
+        if (!string.IsNullOrWhiteSpace(rewardId) && !string.IsNullOrWhiteSpace(redemptionId))
+        {
+            try
+            {
+                CPH.TwitchRedemptionCancel(rewardId, redemptionId);
+            }
+            catch (Exception ex)
+            {
+                log.Warn("Cancel failed: " + ex.Message);
+            }
+        }
+
+        var ev = Fc.CaptureEvent(CPH);
+        Chat(template, user, ev, settings, extra);
+        log.Info("Refund " + reason + " user=" + user);
+        return false;
+    }
+
+    private void Fulfill(string rewardId, string redemptionId)
+    {
+        if (string.IsNullOrWhiteSpace(rewardId) || string.IsNullOrWhiteSpace(redemptionId))
+            return;
+        try
+        {
+            CPH.TwitchRedemptionFulfill(rewardId, redemptionId);
+        }
+        catch
+        {
+        // already fulfilled or skip-queue
+        }
+    }
+
+    private void TryGetRedemptionIds(out string rewardId, out string redemptionId)
+    {
+        rewardId = FirstArg("rewardId", "RewardId", "rewardID");
+        redemptionId = FirstArg("redemptionId", "RedemptionId", "redemptionID");
+    }
+
+    private string FirstArg(params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (CPH.TryGetArg(name, out string s) && !string.IsNullOrWhiteSpace(s))
+                return s.Trim();
+            if (CPH.TryGetArg(name, out object o) && o != null)
+            {
+                string t = Convert.ToString(o);
+                if (!string.IsNullOrWhiteSpace(t))
+                    return t.Trim();
+            }
+        }
+
+        return "";
+    }
+
+    private bool IsSpeakRedemption(Settings settings, string rewardId)
+    {
+        if (MatchesId(settings.SpeakRewardId, rewardId))
+            return true;
+        if (MatchesId(settings.UnlockRewardId, rewardId))
+            return false;
+        string title = RewardTitle();
+        if (TitleLooksLikeUnlock(title))
+            return false;
+        return true;
+    }
+
+    private bool IsUnlockRedemption(Settings settings, string rewardId)
+    {
+        if (MatchesId(settings.UnlockRewardId, rewardId))
+            return true;
+        if (MatchesId(settings.SpeakRewardId, rewardId))
+            return false;
+        return TitleLooksLikeUnlock(RewardTitle());
+    }
+
+    private static bool TitleLooksLikeUnlock(string title)
+    {
+        return !string.IsNullOrWhiteSpace(title) && title.IndexOf("unlock", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    private static bool MatchesId(string configured, string incoming)
+    {
+        return !string.IsNullOrWhiteSpace(configured) && Eq(configured.Trim(), incoming);
+    }
+
+    private string RewardTitle()
+    {
+        foreach (var key in new[] { "rewardName", "rewardTitle", "reward", "triggerName" })
+        {
+            if (CPH.TryGetArg(key, out string v) && !string.IsNullOrWhiteSpace(v))
+                return v.Trim();
+        }
+
+        return "";
+    }
+
+    private string GetRewardInput(EventContext ev)
+    {
+        if (!string.IsNullOrWhiteSpace(ev.RawInput))
+            return ev.RawInput.Trim();
+        foreach (var key in new[] { "userInput", "user_input", "input", "rawInput" })
+        {
+            if (CPH.TryGetArg(key, out string v) && !string.IsNullOrWhiteSpace(v))
+                return v.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(ev.Message))
+            return ev.Message.Trim();
+        return "";
+    }
+
+    private string CheckMessage(string message, Settings settings)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return "empty";
+        if (message.Length > settings.MaxChars)
+            return "too_long";
+        if (settings.BlockUrls && UrlLike.IsMatch(message))
+            return "url";
+        return null;
+    }
+
+    private VoiceInfo FindVoice(Settings settings, string input)
+    {
+        string want = (input ?? "").Trim();
+        if (want.Length == 0)
+            return null;
+        foreach (var v in settings.Catalog)
+        {
+            if (Eq(v.Alias, want) || Eq(v.Display, want))
+                return v;
+        }
+
+        return null;
+    }
+
+    private void Chat(string template, string user, EventContext ev, Settings settings, Dictionary<string, string> extra)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+            return;
+        var vars = BaseVars(user, settings);
+        if (extra != null)
+        {
+            foreach (var kv in extra)
+                vars[kv.Key] = kv.Value ?? "";
+        }
+
+        Reply(Fc.ApplyTemplate(template, vars), ev);
+    }
+
+    private void Reply(string message, EventContext ev)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+        if (!string.IsNullOrWhiteSpace(ev.MessageId))
+            CPH.TwitchReplyToMessage(message, ev.MessageId);
+        else
+            CPH.SendMessage(message);
+    }
+
+    private Dictionary<string, string> BaseVars(string user, Settings settings)
+    {
+        string voices = string.Join(", ", settings.Catalog.Select(v => v.Display + " (" + v.Alias + ")"));
+        var def = FindVoice(settings, settings.DefaultVoice);
+        string prefixEx = (def != null ? def.Alias : "en") + ":";
+        var sample = settings.Catalog.FirstOrDefault(v => !Eq(v.Alias, settings.DefaultVoice)) ?? def;
+        if (sample != null)
+            prefixEx = sample.Alias + (sample.Styles.Length > 0 ? ":" + sample.Styles[0] : ":");
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["user"] = user ?? "",
+            ["alias"] = def?.Alias ?? "",
+            ["style"] = "",
+            ["seconds"] = settings.CooldownSeconds.ToString(CultureInfo.InvariantCulture),
+            ["styles"] = def == null ? "none" : FormatStyles(def),
+            ["prefix"] = prefixEx,
+            ["voices"] = voices,
+            ["owned"] = "",
+            ["sticky"] = "",
+            ["max"] = settings.MaxChars.ToString(CultureInfo.InvariantCulture),
+        };
+    }
+
+    private Dictionary<string, string> VarsForVoice(VoiceInfo voice, Settings settings)
+    {
+        var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (voice == null)
+            return d;
+        d["alias"] = voice.Alias;
+        d["styles"] = FormatStyles(voice);
+        string styleEx = voice.Styles.Length > 0 ? voice.Styles[0] : "";
+        d["prefix"] = voice.Alias + ":";
+        d["style"] = styleEx;
+        if (styleEx.Length > 0)
+            d["prefix"] = voice.Alias + ":" + styleEx + " ";
+        else
+            d["prefix"] = voice.Alias + ":";
+        d["voices"] = string.Join(", ", settings.Catalog.Select(v => v.Display + " (" + v.Alias + ")"));
+        return d;
+    }
+
+    private Dictionary<string, string> VarsFromParse(PrefixParse parsed, Settings settings)
+    {
+        var d = parsed.Voice != null ? VarsForVoice(parsed.Voice, settings) : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(parsed.Style))
+            d["style"] = parsed.Style;
+        if (!string.IsNullOrEmpty(parsed.RawPrefix))
+            d["prefix"] = parsed.RawPrefix;
+        d["max"] = settings.MaxChars.ToString(CultureInfo.InvariantCulture);
+        return d;
+    }
+
+    private Dictionary<string, string> HelpVars(Settings settings)
+    {
+        return VarsForVoice(settings.Catalog.FirstOrDefault(v => !Eq(v.Alias, settings.DefaultVoice)) ?? settings.Catalog[0], settings);
+    }
+
+    private static string FormatStyles(VoiceInfo voice)
+    {
+        if (voice == null || voice.Styles == null || voice.Styles.Length == 0)
+            return "none";
+        return string.Join(", ", voice.Styles);
+    }
+
+    private string TemplateFor(Settings s, string key)
+    {
+        switch (key)
+        {
+            case "paused":
+                return s.MsgPaused;
+            case "cooldown":
+                return s.MsgCooldown;
+            case "unpaid":
+                return s.MsgUnpaid;
+            case "unknown_prefix":
+                return s.MsgUnknownPrefix;
+            case "unknown_style":
+                return s.MsgUnknownStyle;
+            case "empty":
+                return s.MsgEmpty;
+            case "too_long":
+                return s.MsgTooLong;
+            case "url":
+                return s.MsgUrl;
+            default:
+                return s.MsgUnpaid;
+        }
+    }
+
+    private static string MentionName(EventContext ev)
+    {
+        return MessageTemplates.SanitizeMention(!string.IsNullOrWhiteSpace(ev.User) ? ev.User : ev.UserName);
+    }
+
+    private bool IsModOrBroadcaster(EventContext ev)
+    {
+        if (ev.IsModerator)
+            return true;
+        if (CPH.TryGetArg("isBroadcaster", out bool b) && b)
+            return true;
+        try
+        {
+            var broadcaster = CPH.TwitchGetBroadcaster();
+            if (broadcaster != null && (!string.IsNullOrWhiteSpace(ev.UserId) && string.Equals(broadcaster.UserId, ev.UserId, StringComparison.OrdinalIgnoreCase) || Eq(broadcaster.UserName, ev.User) || Eq(broadcaster.UserName, ev.UserName)))
+                return true;
+        }
+        catch
+        {
+        // ignore
+        }
+
+        return Eq(ev.UserType, "broadcaster");
+    }
+
+    private static bool Eq(string a, string b)
+    {
+        return string.Equals(a ?? "", b ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int Clamp(int value, int min, int max)
+    {
+        if (value < min)
+            return min;
+        if (value > max)
+            return max;
+        return value;
+    }
+
+    private static long UnixMs()
+    {
+        return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
+#endregion
+}
