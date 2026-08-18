@@ -190,7 +190,8 @@ Bare aliases like `fit` or `1/2` are rejected — always use `w-fit` / `w-1/2`. 
 ## Reading / writing settings at runtime
 
 Persisted settings key: **`{slug}_settings`** (title slugified), e.g. `"My Extension"` → `my_extension_settings`.
-Use `Fc.SettingsKeyFor(title)` / `Fc.SlugFor(title)` — do **not** use a `FluentConfig_Settings_*` prefix.
+Use `Fc.SettingsKeyFor(title)` / `Fc.SlugFor(title)` — do **not** write new code against `FluentConfig_Settings_*`.
+`Fc.LoadSettings` / `Fc.HasSavedSettings` / `Fc.GetSetting` copy `FluentConfig_Settings_{title}` into the slug key when the new global is empty.
 
 | Context | API |
 |---------|-----|
