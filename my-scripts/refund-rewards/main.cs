@@ -21,8 +21,8 @@ public class CPHInline
     /// Export that timer with the actions so importers keep the same id.
     /// </summary>
     private const string CommitTimerId = "210f448e-0dc5-4913-b375-a557c6ded867";
-    private const string HistoryVar = "refund_rewards_history";
-    private const string PendingJobVar = "refund_rewards_pending";
+    private static readonly string HistoryVar = Fc.KeyFor(Title, "history");
+    private static readonly string PendingJobVar = Fc.KeyFor(Title, "pending");
     private const int HistoryCap = 500;
     private const string Usage = "!refund @user [count]";
     /// <summary>
@@ -349,8 +349,7 @@ public class CPHInline
         if (!string.IsNullOrEmpty(bot.UserId) && bot.UserId == ev.UserId)
             return true;
         string name = FirstNonEmpty(ev.User, ev.UserName);
-        return !string.IsNullOrEmpty(bot.UserName)
-            && string.Equals(name, bot.UserName, StringComparison.OrdinalIgnoreCase);
+        return !string.IsNullOrEmpty(bot.UserName) && string.Equals(name, bot.UserName, StringComparison.OrdinalIgnoreCase);
     }
 
     private bool IsModOrBroadcaster(EventContext ev, out bool isBroadcaster)

@@ -19,7 +19,7 @@ public class CPHInline
 
     public bool Execute()
     {
-        CPH.LogInfo($"[Fire Sale] Opening settings ({ExtensionInfo.Title} v{ExtensionInfo.Version}).");
+        Fc.Logger(CPH, ExtensionInfo.Title, ExtensionInfo.Version).Info("Opening settings.");
         Fc.Open(CPH, ExtensionInfo.Title, ExtensionInfo.Version, ui => ui
                 .WithExtensionUpdateNotice(ExtensionInfo.Repo, ExtensionInfo.Version, tagPrefix: ExtensionInfo.TagPrefix)
                 .Section("General", "General", s => s

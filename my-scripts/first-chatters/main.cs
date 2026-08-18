@@ -26,7 +26,7 @@ public class CPHInline
         int counter = CPH.GetGlobalVar<int>(CounterVar, true);
         if (counter >= settings.MaxCount)
         {
-            CPH.LogDebug($"[First Chatters] All {settings.MaxCount} spots already claimed; disabling.");
+            log.Info($"All {settings.MaxCount} spots already claimed; disabling.");
             DisableSelf(log);
             return false;
         }
@@ -39,12 +39,12 @@ public class CPHInline
             return false;
         }
 
-        if (ShouldExcludeUser(user, settings))
+        if (ShouldExcludeUser(user, settings, log))
             return false;
         var winners = LoadWinners(log);
         if (winners.Any(w => string.Equals(w, user, StringComparison.OrdinalIgnoreCase)))
         {
-            CPH.LogDebug($"[First Chatters] {user} already claimed a spot; skip.");
+            log.Info($"{user} already claimed a spot; skip.");
             return false;
         }
 
@@ -169,14 +169,14 @@ public class CPHInline
         }
     }
 
-    private bool ShouldExcludeUser(string user, Settings settings)
+    private bool ShouldExcludeUser(string user, Settings settings, ExtensionLogger log)
     {
         if (settings.ExcludeBroadcaster)
         {
             var broadcaster = CPH.TwitchGetBroadcaster();
             if (broadcaster != null && string.Equals(user, broadcaster.UserName, StringComparison.OrdinalIgnoreCase))
             {
-                CPH.LogDebug($"[First Chatters] Skip {user}: broadcaster excluded.");
+                log.Info($"Skip {user}: broadcaster excluded.");
                 return true;
             }
         }
@@ -185,14 +185,14 @@ public class CPHInline
         {
             if (KnownBots.IsKnownBot(user))
             {
-                CPH.LogDebug($"[First Chatters] Skip {user}: known bot.");
+                log.Info($"Skip {user}: known bot.");
                 return true;
             }
 
             var bot = CPH.TwitchGetBot();
             if (bot != null && string.Equals(user, bot.UserName, StringComparison.OrdinalIgnoreCase))
             {
-                CPH.LogDebug($"[First Chatters] Skip {user}: connected bot account.");
+                log.Info($"Skip {user}: connected bot account.");
                 return true;
             }
         }

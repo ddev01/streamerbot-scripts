@@ -23,7 +23,7 @@ public class CPHInline
 
     public bool Execute()
     {
-        CPH.LogInfo($"[Fun Commands] Opening settings ({ExtensionInfo.Title} v{ExtensionInfo.Version}).");
+        Fc.Logger(CPH, ExtensionInfo.Title, ExtensionInfo.Version).Info("Opening settings.");
         if (!Fc.HasSavedSettings(CPH, ExtensionInfo.Title))
             Fc.SaveSettings(CPH, ExtensionInfo.Title, SeedBuiltIns);
         else

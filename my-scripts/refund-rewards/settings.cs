@@ -21,7 +21,7 @@ public class CPHInline
 
     public bool Execute()
     {
-        CPH.LogInfo($"[Refund Rewards] Opening settings ({ExtensionInfo.Title} v{ExtensionInfo.Version}).");
+        Fc.Logger(CPH, ExtensionInfo.Title, ExtensionInfo.Version).Info("Opening settings.");
         if (!Fc.HasSavedSettings(CPH, ExtensionInfo.Title))
             Fc.SaveSettings(CPH, ExtensionInfo.Title, SeedDefaults);
         Fc.Open(CPH, ExtensionInfo.Title, ExtensionInfo.Version, ui => ui

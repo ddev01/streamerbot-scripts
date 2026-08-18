@@ -23,7 +23,7 @@ public class CPHInline
 
     public bool Execute()
     {
-        CPH.LogInfo($"[TTS] Opening settings ({ExtensionInfo.Title} v{ExtensionInfo.Version}).");
+        Fc.Logger(CPH, ExtensionInfo.Title, ExtensionInfo.Version).Info("Opening settings.");
         if (!Fc.HasSavedSettings(CPH, ExtensionInfo.Title))
             Fc.SaveSettings(CPH, ExtensionInfo.Title, SeedDefaults);
         Fc.Open(CPH, ExtensionInfo.Title, ExtensionInfo.Version, ui => ui
@@ -141,14 +141,13 @@ public class CPHInline
                             .Textbox("Azure voice ID", "{name}_azure")
                                 .Hint("Full Neural name, e.g. fr-FR-DeniseNeural.")
                             .Textbox("Styles", "{name}_styles")
-                                .Hint("Leave empty. Azure style ids only if you want alias::style later, e.g. cheerful, sad.")
-                        )
+                                .Hint("Leave empty. Azure style ids only if you want alias::style later, e.g. cheerful, sad."))
                         .OnPillAdded((name, ctx) => SyncDefaultVoice(ctx, null))
                         .OnPillRemoved((name, ctx) =>
-                        {
-                            ctx.RemoveSettingsKeys(name + "_display", name + "_azure", name + "_styles");
-                            SyncDefaultVoice(ctx, name);
-                        })
+        {
+            ctx.RemoveSettingsKeys(name + "_display", name + "_azure", name + "_styles");
+            SyncDefaultVoice(ctx, name);
+        })
                     .Dropdown("Default voice", "default_voice")
                         .Hint("Free voice for TTS Speak when they do not prefix another owned voice. Refresh after adding pills.")
                         .Searchable()
@@ -228,16 +227,9 @@ public class CPHInline
     private void SyncDefaultVoice(CallbackContext ctx, string removed)
     {
         var raw = ctx.GetValue<string[]>("voices") ?? Array.Empty<string>();
-        var voices = raw
-            .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Select(v => v.Trim())
-            .Where(v => removed == null || !string.Equals(v, removed, StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var voices = raw.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()).Where(v => removed == null || !string.Equals(v, removed, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         string current = ctx.GetValue<string>("default_voice") ?? "";
-        bool missing = string.IsNullOrWhiteSpace(current)
-            || (removed != null && string.Equals(current, removed, StringComparison.OrdinalIgnoreCase))
-            || !voices.Any(v => string.Equals(v, current, StringComparison.OrdinalIgnoreCase));
+        bool missing = string.IsNullOrWhiteSpace(current) || (removed != null && string.Equals(current, removed, StringComparison.OrdinalIgnoreCase)) || !voices.Any(v => string.Equals(v, current, StringComparison.OrdinalIgnoreCase));
         string next = voices.Length == 0 ? "" : (missing ? voices[0] : current.Trim());
         Fc.SetSetting(CPH, ExtensionInfo.Title, "default_voice", next);
     }

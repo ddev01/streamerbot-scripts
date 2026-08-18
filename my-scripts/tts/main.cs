@@ -23,11 +23,11 @@ public class CPHInline
 {
     private const string Title = "TTS";
     private const string Version = "1.0.0";
-    private const string OwnedVar = "tts_owned";
-    private const string StickyVar = "tts_sticky";
-    private const string LastMsVar = "tts_last_ms";
+    private static readonly string OwnedVar = Fc.KeyFor(Title, "owned");
+    private static readonly string StickyVar = Fc.KeyFor(Title, "sticky");
+    private static readonly string LastMsVar = Fc.KeyFor(Title, "last_ms");
     private const string FallbackAzureVoice = "en-GB-Ollie:DragonHDLatestNeural";
-    private static readonly object CooldownGate = new object();
+    private static readonly object CooldownGate = new object ();
     private static readonly Dictionary<string, long> LastSpeakLocal = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient Http = new HttpClient
     {
@@ -157,13 +157,7 @@ public class CPHInline
 
         if (s.Catalog.Count == 0)
         {
-            s.Catalog.Add(new VoiceInfo
-            {
-                Alias = "en",
-                Display = "English",
-                AzureId = FallbackAzureVoice,
-                Styles = Array.Empty<string>(),
-            });
+            s.Catalog.Add(new VoiceInfo { Alias = "en", Display = "English", AzureId = FallbackAzureVoice, Styles = Array.Empty<string>(), });
             s.DefaultVoice = "en";
         }
         else if (FindVoice(s, s.DefaultVoice) == null)
@@ -242,7 +236,6 @@ public class CPHInline
         bool ok = SynthesizeAndPlay(settings, keys, parsed.Voice.AzureId, parsed.Style, parsed.Message, log);
         if (!ok)
             return Refund(rewardId, redemptionId, settings.MsgSynthFail, user, settings, log, "azure");
-
         Fulfill(rewardId, redemptionId);
         SetLastSpeakMs(userId, userName, UnixMs());
         log.Info($"{user} TTS alias={parsed.Voice.Alias} style={parsed.Style ?? "-"} chars={parsed.Message.Length}");
@@ -577,7 +570,14 @@ public class CPHInline
         foreach (string voice in VoiceNameFallbacks(azureVoice))
         {
             string locale = LocaleFromVoice(voice);
-            foreach (string ssml in new[] { BuildSsml(voice, locale, style, text, false), BuildSsml(voice, locale, style, text, true), BuildSsml(voice, locale, null, text, true), })
+            foreach (string ssml in new[]
+            {
+                BuildSsml(voice, locale, style, text, false),
+                BuildSsml(voice, locale, style, text, true),
+                BuildSsml(voice, locale, null, text, true),
+            }
+
+            )
             {
                 if (seen.Add(ssml))
                     yield return ssml;
@@ -1141,7 +1141,15 @@ public class CPHInline
 
     private string RewardTitle()
     {
-        foreach (var key in new[] { "rewardName", "rewardTitle", "reward", "triggerName" })
+        foreach (var key in new[]
+        {
+            "rewardName",
+            "rewardTitle",
+            "reward",
+            "triggerName"
+        }
+
+        )
         {
             if (CPH.TryGetArg(key, out string v) && !string.IsNullOrWhiteSpace(v))
                 return v.Trim();
@@ -1154,7 +1162,15 @@ public class CPHInline
     {
         if (!string.IsNullOrWhiteSpace(ev.RawInput))
             return ev.RawInput.Trim();
-        foreach (var key in new[] { "userInput", "user_input", "input", "rawInput" })
+        foreach (var key in new[]
+        {
+            "userInput",
+            "user_input",
+            "input",
+            "rawInput"
+        }
+
+        )
         {
             if (CPH.TryGetArg(key, out string v) && !string.IsNullOrWhiteSpace(v))
                 return v.Trim();
@@ -1165,7 +1181,10 @@ public class CPHInline
         return "";
     }
 
-    private static readonly char[] WordSeparators = { ' ' };
+    private static readonly char[] WordSeparators =
+    {
+        ' '
+    };
     private string CheckMessage(string message, Settings settings)
     {
         if (string.IsNullOrWhiteSpace(message))
@@ -1179,10 +1198,7 @@ public class CPHInline
 
     private static string CheckAntiSpam(string message, Settings settings)
     {
-        bool needWords = settings.SpamBlockedWords
-            || settings.SpamWordRepeat
-            || settings.SpamPhrase
-            || settings.SpamUnique;
+        bool needWords = settings.SpamBlockedWords || settings.SpamWordRepeat || settings.SpamPhrase || settings.SpamUnique;
         if (!settings.SpamCharRepeat && !needWords)
             return null;
         string normalized = NormalizeMessage(message);

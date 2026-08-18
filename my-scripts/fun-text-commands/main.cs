@@ -61,7 +61,7 @@ public class CPHInline
             if (settings.ReplyUnknown)
                 ReplyToMessage("Unknown command.", ev);
             else
-                CPH.LogDebug("[Fun Commands] No matching command.");
+                log.Info("No matching command.");
             return true;
         }
 
@@ -188,10 +188,19 @@ public class CPHInline
             return groups.Where(g => !string.IsNullOrWhiteSpace(g)).Select(g => g.Trim()).ToArray();
         var legacy = Fc.GetSetting(CPH, Title, "exclude_group", "");
         if (!string.IsNullOrWhiteSpace(legacy))
-            return new[]
+        {
+            var migrated = new[]
             {
                 legacy.Trim()
             };
+            Fc.SaveSettings(CPH, Title, o =>
+            {
+                o["exclude_groups"] = new JArray(migrated);
+                o.Remove("exclude_group");
+            });
+            return migrated;
+        }
+
         return Array.Empty<string>();
     }
 
@@ -488,7 +497,7 @@ public class CPHInline
         var json = CPH.GetGlobalVar<string>("currentViewers", false);
         if (string.IsNullOrEmpty(json))
         {
-            CPH.LogInfo("[Fun Commands] No currentViewers data available");
+            Fc.Logger(CPH, Title, Version).Warn("No currentViewers data available.");
             return null;
         }
 
@@ -499,7 +508,7 @@ public class CPHInline
         }
         catch (Exception ex)
         {
-            CPH.LogInfo($"[Fun Commands] Error deserializing currentViewers: {ex.Message}");
+            Fc.Logger(CPH, Title, Version).Failed("deserializing currentViewers", ex);
             return null;
         }
 
@@ -549,7 +558,7 @@ public class CPHInline
 
         if (viewers.Count == 0)
         {
-            CPH.LogInfo("[Fun Commands] No viewers found");
+            Fc.Logger(CPH, Title, Version).Info("No eligible viewers found.");
             return null;
         }
 
