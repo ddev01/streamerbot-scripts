@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pick media</title>
+  <style>
+    :root {
+      --bg: #141414;
+      --panel: #1e1e1e;
+      --line: #333;
+      --text: #eee;
+      --muted: #9a9a9a;
+      --accent: #00ff99;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Segoe UI, Arial, sans-serif;
+    }
+    header {
+      padding: 12px 16px 8px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    #search {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #111;
+      color: var(--text);
+      font-size: 15px;
+    }
+    #cats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      overflow: hidden;
+      padding: 10px 0 4px;
+    }
+    #cats button, #more {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      background: #111;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    #cats button.on, #cats button:hover, #more:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    #status {
+      padding: 8px 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 8px;
+      padding: 0 16px 16px;
+    }
+    #grid button {
+      padding: 0;
+      border: 0;
+      background: #0b0b0b;
+      border-radius: 8px;
+      overflow: hidden;
+      cursor: pointer;
+      aspect-ratio: 1;
+    }
+    #grid img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    #morewrap { text-align: center; padding: 8px 16px 24px; }
+    footer {
+      position: sticky;
+      bottom: 0;
+      padding: 8px 16px;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    footer a.by-giphy {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    footer a.by-giphy:hover { color: var(--text); }
+    footer a.by-giphy svg { display: block; height: 18px; width: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <input id="search" type="search" placeholder="Search Giphy…" autocomplete="off" />
+    <div id="cats"></div>
+  </header>
+  <div id="status">Trending</div>
+  <div id="grid"></div>
+  <div id="morewrap"><button id="more" type="button">Load more</button></div>
+  <footer>
+    <span>Click a GIF to download it into this alert.</span>
+    <a class="by-giphy" href="https://giphy.com" target="_blank" rel="noreferrer">
+      <span>Powered by</span>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 35" height="18" aria-label="GIPHY">
+        <path fill="#eee" d="M0 3h4v29H0z"/>
+        <path fill="#04FF8E" d="M24 11h4v21h-4z"/>
+        <path fill="#8E2EFF" d="M0 31h28v4H0z"/>
+        <path fill="#00C5FF" d="M0 0h16v4H0z"/>
+        <path fill="#FFF152" d="M24 3h4v4h-4z"/>
+        <path fill="#FF5B5B" d="M0 11h4v4H0z"/>
+      </svg>
+    </a>
+  </footer>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const key = params.get("key") || "";
+    const grid = document.getElementById("grid");
+    const status = document.getElementById("status");
+    const catsEl = document.getElementById("cats");
+    const search = document.getElementById("search");
+    let offset = 0;
+    let mode = "trending";
+    let query = "";
+    let busy = false;
+
+    function post(obj) {
+      const payload = JSON.stringify(obj);
+      if (window.chrome && window.chrome.webview)
+        window.chrome.webview.postMessage(payload);
+    }
+
+    function api(path) {
+      const join = path.indexOf("?") >= 0 ? "&" : "?";
+      return "https://api.giphy.com/v1/" + path + join + "api_key=" + encodeURIComponent(key) + "&rating=pg-13";
+    }
+
+    function thumb(g) {
+      const img = (g.images && (g.images.fixed_width_small || g.images.preview_gif || g.images.downsized)) || {};
+      const full = (g.images && (g.images.downsized_medium || g.images.downsized || g.images.original)) || {};
+      return {
+        preview: img.url || img.webp || "",
+        url: full.url || g.url || "",
+        id: g.id || "",
+        title: g.title || g.id || "gif"
+      };
+    }
+
+    function render(items, append) {
+      if (!append) grid.innerHTML = "";
+      items.forEach(function (g) {
+        const t = thumb(g);
+        if (!t.preview || !t.url) return;
+        const b = document.createElement("button");
+        b.type = "button";
+        const im = document.createElement("img");
+        im.src = t.preview;
+        im.alt = t.title;
+        b.appendChild(im);
+        b.onclick = function () {
+          status.textContent = "Saving " + t.title + "…";
+          post({ type: "giphy", url: t.url, id: t.id, title: t.title });
+        };
+        grid.appendChild(b);
+      });
+    }
+
+    async function load(reset) {
+      if (busy || !key) return;
+      busy = true;
+      if (reset) offset = 0;
+      status.textContent = mode === "trending" ? "Trending…" : "Search: " + query;
+      try {
+        var path = mode === "trending"
+          ? "gifs/trending?limit=30&offset=" + offset
+          : "gifs/search?limit=30&offset=" + offset + "&q=" + encodeURIComponent(query);
+        const res = await fetch(api(path));
+        const json = await res.json();
+        const items = json.data || [];
+        render(items, !reset);
+        offset += items.length;
+        status.textContent = (mode === "trending" ? "Trending" : query) + " · " + grid.children.length + " shown";
+      } catch (e) {
+        status.textContent = "Giphy request failed. Check the API key and network.";
+      }
+      busy = false;
+    }
+
+    async function loadCats() {
+      try {
+        const res = await fetch(api("gifs/categories"));
+        const json = await res.json();
+        const cats = json.data || [];
+        const trending = document.createElement("button");
+        trending.textContent = "Trending";
+        trending.className = "on";
+        trending.onclick = function () {
+          Array.prototype.forEach.call(catsEl.querySelectorAll("button"), function (x) { x.className = ""; });
+          trending.className = "on";
+          mode = "trending";
+          query = "";
+          load(true);
+        };
+        catsEl.appendChild(trending);
+        cats.slice(0, 16).forEach(function (c) {
+          const name = c.name || (c.name_encoded || "");
+          if (!name) return;
+          const b = document.createElement("button");
+          b.textContent = name;
+          b.onclick = function () {
+            Array.prototype.forEach.call(catsEl.querySelectorAll("button"), function (x) { x.className = ""; });
+            b.className = "on";
+            mode = "search";
+            query = name;
+            search.value = name;
+            load(true);
+          };
+          catsEl.appendChild(b);
+        });
+      } catch (e) {}
+    }
+
+    var t = null;
+    search.addEventListener("input", function () {
+      clearTimeout(t);
+      t = setTimeout(function () {
+        query = search.value.trim();
+        mode = query ? "search" : "trending";
+        Array.prototype.forEach.call(catsEl.querySelectorAll("button"), function (x, i) {
+          x.className = (!query && i === 0) ? "on" : "";
+        });
+        load(true);
+      }, 300);
+    });
+    document.getElementById("more").onclick = function () { load(false); };
+
+    if (!key) {
+      status.textContent = "No Giphy key. Save one in Alerts settings.";
+    } else {
+      loadCats();
+      load(true);
+    }
+  </script>
+</body>
+</html>

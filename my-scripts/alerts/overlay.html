@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Choppa Alerts</title>
+        <script src="streamerbot-client.js"></script>
+        <style>
+            html,
+            body {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: transparent;
+                font-family: Arial, sans-serif;
+            }
+            #stage {
+                width: 100%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                pointer-events: none;
+            }
+            #visual {
+                max-width: 70vw;
+                max-height: 70vh;
+                object-fit: contain;
+                display: none;
+            }
+            #caption {
+                margin-top: 12px;
+                color: #fff;
+                font-size: 36px;
+                font-weight: 700;
+                text-shadow:
+                    0 2px 8px #000,
+                    0 0 4px #000;
+                text-align: center;
+                max-width: 90vw;
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="stage">
+            <img id="visual" alt="" />
+            <video
+                id="video"
+                playsinline
+                style="max-width: 70vw; max-height: 70vh; object-fit: contain; display: none"
+            ></video>
+            <div id="caption"></div>
+        </div>
+        <audio id="audio"></audio>
+        <script>
+            const params = new URLSearchParams(location.search);
+            const host = params.get('address') || params.get('host') || '127.0.0.1';
+            const port = parseInt(params.get('port') || '8080', 10);
+            const password = params.get('password') || '';
+
+            const img = document.getElementById('visual');
+            const video = document.getElementById('video');
+            const caption = document.getElementById('caption');
+            const audio = document.getElementById('audio');
+
+            const queue = [];
+            let busy = false;
+
+            function hideAll() {
+                img.style.display = 'none';
+                img.removeAttribute('src');
+                video.pause();
+                video.removeAttribute('src');
+                video.style.display = 'none';
+                audio.pause();
+                audio.removeAttribute('src');
+                caption.style.display = 'none';
+                caption.textContent = '';
+            }
+
+            function wait(ms) {
+                return new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            function mediaEnded(el, timeoutMs) {
+                return new Promise((resolve) => {
+                    let done = false;
+                    const finish = () => {
+                        if (done) return;
+                        done = true;
+                        el.removeEventListener('ended', finish);
+                        el.removeEventListener('error', finish);
+                        resolve();
+                    };
+                    el.addEventListener('ended', finish);
+                    el.addEventListener('error', finish);
+                    if (timeoutMs > 0) setTimeout(finish, timeoutMs);
+                });
+            }
+
+            function isVideo(url) {
+                return /\.(mp4|webm|mov)(\?|$)/i.test(url || '');
+            }
+
+            async function playItem(item) {
+                const volume = Math.max(0, Math.min(1, (Number(item.volume) || 100) / 100));
+                const cap = Math.max(0, Number(item.durationMs) || 0);
+                const fallback = cap > 0 ? cap : 15000;
+                const waits = [];
+
+                if (item.text) {
+                    caption.textContent = item.text;
+                    caption.style.display = 'block';
+                }
+
+                if (item.gif) {
+                    if (isVideo(item.gif)) {
+                        video.src = item.gif;
+                        video.volume = volume;
+                        video.style.display = 'block';
+                        try {
+                            await video.play();
+                        } catch (e) {}
+                        waits.push(mediaEnded(video, fallback));
+                    } else {
+                        img.src = item.gif;
+                        img.style.display = 'block';
+                        waits.push(wait(fallback));
+                    }
+                }
+
+                if (item.sound) {
+                    audio.src = item.sound;
+                    audio.volume = volume;
+                    try {
+                        await audio.play();
+                    } catch (e) {}
+                    waits.push(mediaEnded(audio, fallback));
+                }
+
+                if (waits.length === 0) await wait(Math.min(fallback, 4000));
+                else if (cap > 0) await Promise.race([Promise.all(waits), wait(cap)]);
+                else await Promise.all(waits);
+
+                hideAll();
+            }
+
+            async function pump() {
+                if (busy) return;
+                const next = queue.shift();
+                if (!next) return;
+                busy = true;
+                try {
+                    await playItem(next);
+                } catch (e) {
+                    console.error(e);
+                    hideAll();
+                }
+                busy = false;
+                pump();
+            }
+
+            function coerce(x) {
+                if (x == null) return null;
+                if (typeof x === 'string') {
+                    var s = x.trim();
+                    if (!s) return null;
+                    try {
+                        x = JSON.parse(s);
+                    } catch (e) {
+                        return null;
+                    }
+                }
+                if (typeof x !== 'object') return null;
+                return x;
+            }
+
+            function findAlert(x) {
+                var d = coerce(x);
+                if (!d) return null;
+                if (d.type === 'choppa.alert') return d;
+                if (d.data !== undefined) {
+                    var inner = findAlert(d.data);
+                    if (inner) return inner;
+                }
+                if (d.payload) return findAlert(d.payload);
+                return null;
+            }
+
+            function enqueue(raw) {
+                var item = findAlert(raw);
+                if (!item) return;
+                queue.push({
+                    gif: item.gif || '',
+                    sound: item.sound || '',
+                    text: item.text || '',
+                    volume: item.volume,
+                    durationMs: item.durationMs,
+                });
+                pump();
+            }
+
+            function fromMessage(message) {
+                enqueue(message);
+            }
+
+            const client = new StreamerbotClient({
+                host,
+                address: host,
+                port,
+                password,
+                endpoint: '/',
+                autoReconnect: true,
+                immediate: true,
+                onOpen: function () {
+                    console.log('[alerts] websocket open');
+                },
+                onConnect: function () {
+                    console.log('[alerts] websocket connected');
+                },
+                onError: function (err) {
+                    console.error('[alerts] websocket', err);
+                },
+            });
+            client.on('General.Custom', fromMessage);
+        </script>
+    </body>
+</html>
