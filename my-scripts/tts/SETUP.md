@@ -18,7 +18,7 @@ Create **two** custom rewards. Both need:
 
 - Title example: `TTS Message`
 - Cost: `400`
-- Prompt example: `Default English. Own a voice? Start with alias:style then a space, e.g. ch:angry hello or fr: bonjour. Sticky: !tts set fr`
+- Prompt example: `Default English. Own a voice? Start with the alias, then a space, e.g. fr bonjour or ch nihao. Sticky: !tts set fr`
 
 ### Unlock TTS Voice
 
@@ -30,18 +30,27 @@ Optional: put both in the same Twitch reward group so Fire Sale can discount the
 
 ## 2. Four Streamer.bot actions
 
+Group: `{CHOPPA} - TTS`
+
+| Action | File / method |
+|--------|----------------|
+| `{TTS} 0 Settings` | [`settings.cs`](settings.cs) `Execute` |
+| `{TTS} 1 Main` | [`main.cs`](main.cs) `TtsSpeak` (code hub) |
+| `{TTS} Unlock` | same `main.cs` `TtsUnlock` |
+| `{TTS} Command` | same `main.cs` `TtsCommand` — command named `{TTS} Command`, chat `!tts` |
+
 Common pattern: a **disabled** Execute C# Code sub-action holds the source; an **Execute C# Method** sub-action calls the method.
 
 Copy `FluentConfig.dll` into Streamer.bot `dlls/` if it is not there already. Do **not** copy WebView2 DLLs.
 
-### TTS — Settings
+### `{TTS} 0 Settings`
 
 - Sub-action **Execute C# Code**: paste [`settings.cs`](settings.cs), then disable this sub-action (source only)
 - Sub-action **Execute C# Method**: method `Execute`, **Run on UI thread** = on
 - Refs: `PresentationFramework`, `PresentationCore`, `WindowsBase`, `FluentConfig.dll` (from `dlls/`)
 - No trigger required; run it from the actions list to open the menu
 
-### TTS — Speak
+### `{TTS} 1 Main` (speak)
 
 - Paste [`main.cs`](main.cs) the same way (disabled code + method)
 - **Disable** Execute C# Code (source only). If that sub-action stays enabled it runs `Execute()` and does not speak.
@@ -50,21 +59,21 @@ Copy `FluentConfig.dll` into Streamer.bot `dlls/` if it is not there already. Do
 - **Do not allow concurrent** / queue this action so clips play one after another (`PlaySound` waits until finished)
 - Trigger: **Twitch Reward Redemption** filtered to **TTS Speak** only (not “any reward”)
 
-### TTS — Unlock
+### `{TTS} Unlock`
 
 - Same `main.cs` source (or share the file in Streamer.bot if you keep one copy)
 - Method: **`TtsUnlock`**
-- Same refs as Speak
+- Same refs as `{TTS} 1 Main`
 - Concurrent is fine
 - Trigger: **Twitch Reward Redemption** filtered to **Unlock TTS Voice** only
 
-In **TTS Settings**, pick both rewards in the two dropdowns (Refresh if the list is empty), then Save. Unlock will ignore Speak redemptions; without that, a shared “any reward” trigger treats `hello world` as a voice name.
+In **`{TTS} 0 Settings`**, pick both rewards in the two dropdowns (Refresh if the list is empty), then Save. Unlock will ignore Speak redemptions; without that, a shared “any reward” trigger treats `hello world` as a voice name.
 
-### TTS — Command
+### `{TTS} Command`
 
 - Same `main.cs`
 - Method: `TtsCommand`
-- Same refs as Speak
+- Same refs as `{TTS} 1 Main`
 - Concurrent is fine
 - Trigger: **Twitch Command** `!tts` with extra arguments included (`rawInput` is the rest of the line)
 
@@ -79,33 +88,33 @@ Commands:
 
 ## 3. TTS settings menu
 
-Run **TTS — Settings**, Save once (seeds English/French/Spanish/Chinese/German). Then:
+Run **`{TTS} 0 Settings`**, Save once (seeds English/French/Spanish/Chinese/German). Then:
 
 1. Paste the Azure Speech **key** (and region, default `northeurope`)
 2. Refresh and pick the two rewards
-3. Confirm Azure voice IDs and style lists on each pill (edit to taste)
-4. Default voice alias should be `en` (free English, **no styles** until they unlock English)
+3. Confirm Azure voice IDs on each pill (edit to taste). Leave **Styles** empty unless you want `alias::style` later
+4. Default voice alias should be `en` (free English, no prefix needed)
 
 ## 4. How viewers use it
 
 | Typed in TTS Message | Result |
 | --- | --- |
-| `hello there` | Sticky voice, or default English, no style |
-| `ch: hello there` | Chinese, default style (must own `ch`) |
-| `ch:angry hello there` | Chinese + angry (must own `ch`, style must be on that voice) |
-| `angry: hello there` | Style only; needs a sticky **owned** voice that lists `angry` |
+| `hello there` | Sticky voice, or default English |
+| `ch hello there` | Chinese (must own `ch`) |
+| `ch: hello there` | Same as `ch hello` (old colon prefix still works) |
+| `ch::cheerful hello there` | Chinese + style, **only if** that voice's Styles box lists `cheerful` |
 
-Unpaid / unknown prefix or style, empty text, URLs, over max length, cooldown, or TTS paused → **refund** + short chat. Successful speak is **fulfilled** then synthesized.
+Unpaid voice, empty text, URLs, over max length, optional anti-spam (off by default), cooldown, or TTS paused → **refund** + short chat. Successful speak is **fulfilled** then synthesized.
 
-Unlock: type `French` or `fr`. Already owned or unknown → refund. Success → chat with styles, prefix example, `!tts set`.
+Unlock: type `French` or `fr`. Already owned or unknown → refund. Success → chat with prefix example and `!tts set`.
 
 ## 5. Test checklist
 
 1. Redeem TTS Message with `hello` → English audio, points spent
-2. Redeem with `ch: nihao` before unlocking Chinese → refund, no audio
+2. Redeem with `ch nihao` before unlocking Chinese → refund, no audio
 3. Redeem Unlock with `ch` or `Chinese` → owned; chat explains prefix + `!tts set ch`
-4. Redeem TTS Message with `ch:angry hello` → Chinese angry (if that style is on the pill)
+4. Redeem TTS Message with `ch hello` → Chinese (must own `ch`)
 5. `!tts set ch` then TTS Message `hello` → Chinese without a prefix
-6. Redeem TTS Message twice within 30s → second refund, seconds left
+6. Redeem TTS Message twice within 30s → second refunds with `TTS is on cooldown (Xs left).`
 7. `!tts off` → both rewards greyed/paused; redeem (if still possible) refunds; `!tts on` restores
 8. Confirm skip-queue is still **off** so refunds actually return points

@@ -7,6 +7,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,7 +26,9 @@ public class CPHInline
     private const string OwnedVar = "tts_owned";
     private const string StickyVar = "tts_sticky";
     private const string LastMsVar = "tts_last_ms";
-    private const string FallbackAzureVoice = "en-US-AriaNeural";
+    private const string FallbackAzureVoice = "en-GB-Ollie:DragonHDLatestNeural";
+    private static readonly object CooldownGate = new object();
+    private static readonly Dictionary<string, long> LastSpeakLocal = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient Http = new HttpClient
     {
         Timeout = TimeSpan.FromSeconds(30)
@@ -58,25 +61,38 @@ public class CPHInline
         public string AzureKey { get; set; } = "";
         public string AzureKey2 { get; set; } = "";
         public string Region { get; set; } = "northeurope";
-        public int Volume { get; set; } = 100;
+        public int Volume { get; set; } = 50;
         public string SpeakRewardId { get; set; } = "";
         public string UnlockRewardId { get; set; } = "";
-        public int CooldownSeconds { get; set; } = 30;
+        public int CooldownSeconds { get; set; } = 15;
         public int MaxChars { get; set; } = 250;
         public bool BlockUrls { get; set; } = true;
+        public bool SpamCharRepeat { get; set; }
+        public int SpamCharRepeatMax { get; set; } = 8;
+        public bool SpamWordRepeat { get; set; }
+        public int SpamWordRepeatMax { get; set; } = 5;
+        public bool SpamPhrase { get; set; }
+        public int SpamPhraseMaxWords { get; set; } = 6;
+        public int SpamPhraseMinRepeats { get; set; } = 5;
+        public bool SpamUnique { get; set; }
+        public int SpamUniqueMinWords { get; set; } = 8;
+        public double SpamUniqueMinRatio { get; set; } = 0.35;
+        public bool SpamBlockedWords { get; set; }
+        public string[] BlockedWords { get; set; } = Array.Empty<string>();
         public string DefaultVoice { get; set; } = "en";
         public string[] Voices { get; set; } = Array.Empty<string>();
         public List<VoiceInfo> Catalog { get; set; } = new List<VoiceInfo>();
         public string MsgHelp { get; set; } = "@{user} Redeem TTS Message to speak (default English). Prefix a voice you own: {prefix}hello. Unlock voices with Unlock TTS Voice. !tts voices | !tts set <alias>";
-        public string MsgCooldown { get; set; } = "@{user} TTS cooldown: {seconds}s left.";
+        public string MsgCooldown { get; set; } = "@{user} TTS is on cooldown ({seconds}s left).";
         public string MsgPaused { get; set; } = "@{user} TTS is paused right now.";
         public string MsgUnpaid { get; set; } = "@{user} You don't own {alias}. Unlock it with Unlock TTS Voice.";
         public string MsgUnknownPrefix { get; set; } = "@{user} Unknown voice '{prefix}'. Unlock names: {voices}.";
-        public string MsgUnknownStyle { get; set; } = "@{user} {alias} styles: {styles}.";
+        public string MsgUnknownStyle { get; set; } = "@{user} {alias} has no style '{style}'.";
         public string MsgEmpty { get; set; } = "@{user} Type a message after the prefix.";
         public string MsgTooLong { get; set; } = "@{user} TTS is too long (max {max} characters).";
         public string MsgUrl { get; set; } = "@{user} Links are not allowed in TTS.";
-        public string MsgUnlockOk { get; set; } = "@{user} unlocked {alias}. Styles: {styles}. TTS prefix: {prefix}hello (or {prefix}angry hello if that style exists). Sticky: !tts set {alias}";
+        public string MsgSpam { get; set; } = "@{user} That TTS looks like spam.";
+        public string MsgUnlockOk { get; set; } = "@{user} unlocked {alias}. TTS prefix: {prefix}hello. Sticky: !tts set {alias}";
         public string MsgUnlockOwned { get; set; } = "@{user} You already own {alias}.";
         public string MsgUnlockUnknown { get; set; } = "@{user} Unknown voice. Try: {voices}";
         public string MsgSetOk { get; set; } = "@{user} Default TTS voice is now {alias}.";
@@ -113,6 +129,14 @@ public class CPHInline
             x.Volume = Clamp(x.Volume, 0, 100);
             x.CooldownSeconds = Clamp(x.CooldownSeconds, 0, 3600);
             x.MaxChars = Clamp(x.MaxChars, 1, 2000);
+            x.SpamCharRepeatMax = Clamp(x.SpamCharRepeatMax, 2, 40);
+            x.SpamWordRepeatMax = Clamp(x.SpamWordRepeatMax, 2, 50);
+            x.SpamPhraseMaxWords = Clamp(x.SpamPhraseMaxWords, 1, 20);
+            x.SpamPhraseMinRepeats = Clamp(x.SpamPhraseMinRepeats, 2, 20);
+            x.SpamUniqueMinWords = Clamp(x.SpamUniqueMinWords, 3, 100);
+            x.SpamUniqueMinRatio = ClampDouble(x.SpamUniqueMinRatio, 0.05, 1.0);
+            if (x.BlockedWords == null)
+                x.BlockedWords = Array.Empty<string>();
             if (string.IsNullOrWhiteSpace(x.DefaultVoice))
                 x.DefaultVoice = "";
             else
@@ -171,7 +195,8 @@ public class CPHInline
         var settings = LoadSettings();
         var ev = Fc.CaptureEvent(CPH);
         string user = MentionName(ev);
-        string userId = ev.UserId;
+        string userId = ResolveUserId(ev);
+        string userName = CooldownUserName(ev, user);
         TryGetRedemptionIds(out var rewardId, out var redemptionId);
         if (!IsSpeakRedemption(settings, rewardId))
         {
@@ -183,9 +208,12 @@ public class CPHInline
         log.Info("Speak user=" + user + " chars=" + (input ?? "").Length);
         if (IsPaused())
             return Refund(rewardId, redemptionId, settings.MsgPaused, user, settings, log, "paused");
-        int wait = CooldownRemainingSeconds(userId, settings.CooldownSeconds);
+        if (settings.CooldownSeconds > 0 && string.IsNullOrWhiteSpace(CooldownKey(userId, userName)))
+            log.Warn("Cooldown skipped; no Twitch user id or name on this redemption.");
+        int wait = CooldownRemainingSeconds(userId, userName, settings.CooldownSeconds);
         if (wait > 0)
         {
+            log.Info("Cooldown user=" + user + " wait=" + wait + "s");
             return Refund(rewardId, redemptionId, settings.MsgCooldown, user, settings, log, "cooldown", new Dictionary<string, string> { ["seconds"] = wait.ToString(CultureInfo.InvariantCulture) });
         }
 
@@ -211,15 +239,12 @@ public class CPHInline
             return false;
         }
 
-        Fulfill(rewardId, redemptionId);
         bool ok = SynthesizeAndPlay(settings, keys, parsed.Voice.AzureId, parsed.Style, parsed.Message, log);
         if (!ok)
-        {
-            Chat(settings.MsgSynthFail, user, ev, settings, VarsFromParse(parsed, settings));
-            return false;
-        }
+            return Refund(rewardId, redemptionId, settings.MsgSynthFail, user, settings, log, "azure");
 
-        SetLastSpeakMs(userId, UnixMs());
+        Fulfill(rewardId, redemptionId);
+        SetLastSpeakMs(userId, userName, UnixMs());
         log.Info($"{user} TTS alias={parsed.Voice.Alias} style={parsed.Style ?? "-"} chars={parsed.Message.Length}");
         return true;
     }
@@ -377,15 +402,24 @@ public class CPHInline
         var ownedBits = settings.Catalog.Where(v => Owns(owned, v.Alias) || Eq(v.Alias, settings.DefaultVoice)).Select(v =>
         {
             string mark = Eq(v.Alias, sticky) ? "*" : "";
-            string styles = v.Styles.Length == 0 ? "no styles" : string.Join(", ", v.Styles);
-            string free = Eq(v.Alias, settings.DefaultVoice) && !Owns(owned, v.Alias) ? "free, unlock for styles" : styles;
-            return $"{v.Alias}{mark} ({free})";
+            bool isFreeDefault = Eq(v.Alias, settings.DefaultVoice) && !Owns(owned, v.Alias);
+            var bits = new List<string>();
+            if (isFreeDefault)
+                bits.Add("free");
+            if (v.Styles.Length > 0)
+                bits.Add(string.Join(", ", v.Styles));
+            return bits.Count == 0 ? $"{v.Alias}{mark}" : $"{v.Alias}{mark} ({string.Join("; ", bits)})";
         });
         string buyable = string.Join(", ", settings.Catalog.Select(v => $"{v.Display}={v.Alias}"));
         string ownedText = string.Join(" | ", ownedBits);
         if (string.IsNullOrWhiteSpace(ownedText))
             ownedText = "(none)";
-        string line = $"@{user} Voices: {ownedText}. Buy: {buyable}. Sticky *: !tts set <alias>. Prefix: {settings.Catalog[0].Alias}:hello";
+        var sample = settings.Catalog.FirstOrDefault(v => !Eq(v.Alias, settings.DefaultVoice)) ?? settings.Catalog[0];
+        string prefixHint = sample.Alias + " hello";
+        var styled = settings.Catalog.FirstOrDefault(v => v.Styles.Length > 0);
+        if (styled != null)
+            prefixHint += "; " + styled.Alias + "::" + styled.Styles[0] + " hello";
+        string line = $"@{user} Voices: {ownedText}. Buy: {buyable}. Sticky *: !tts set <alias>. Prefix: {prefixHint}";
         Reply(line, ev);
     }
 
@@ -403,55 +437,49 @@ public class CPHInline
 
         int space = text.IndexOf(' ');
         string token = space < 0 ? text : text.Substring(0, space);
-        bool hasColon = token.IndexOf(':') >= 0;
-        if (!hasColon)
+        string rest = space < 0 ? "" : text.Substring(space + 1).Trim();
+        int styleSep = token.IndexOf("::", StringComparison.Ordinal);
+        if (styleSep >= 0)
         {
-            result.Voice = ResolveStickyOrDefault(userId, settings);
-            result.Message = text;
-            if (!CanUseVoice(userId, result.Voice, null, settings))
-            {
-                result.ErrorKey = "unpaid";
-                result.RawPrefix = result.Voice.Alias;
-            }
-
-            return result;
-        }
-
-        string message = space < 0 ? "" : text.Substring(space + 1).Trim();
-        result.Message = message;
-        result.RawPrefix = token;
-        string left;
-        string stylePart;
-        int colon = token.IndexOf(':');
-        left = token.Substring(0, colon).Trim();
-        stylePart = token.Substring(colon + 1).Trim();
-        if (left.Length > 0)
-        {
-            var byAlias = FindVoice(settings, left);
-            if (byAlias != null)
-            {
-                result.Voice = byAlias;
-                result.Style = stylePart.Length == 0 ? null : stylePart;
-            }
-        }
-
-        if (result.Voice == null)
-        {
-            // Style-only: angry:
-            string styleName = left.Length > 0 ? left : stylePart;
-            var sticky = ResolveStickyOrDefault(userId, settings);
-            if (!string.IsNullOrEmpty(styleName) && HasStyle(sticky, styleName))
-            {
-                result.Voice = sticky;
-                result.Style = styleName;
-            }
-            else
+            string left = token.Substring(0, styleSep).Trim();
+            string stylePart = token.Substring(styleSep + 2).Trim();
+            result.RawPrefix = token;
+            result.Message = rest;
+            result.Voice = left.Length == 0 ? ResolveStickyOrDefault(userId, settings) : FindVoiceByAlias(settings, left);
+            if (result.Voice == null)
             {
                 result.ErrorKey = "unknown_prefix";
                 return result;
             }
+
+            result.Style = stylePart.Length == 0 ? null : stylePart;
+            return FinishPrefix(result, userId, settings);
         }
 
+        string aliasToken = token.TrimEnd(':');
+        bool trailingColons = aliasToken.Length > 0 && aliasToken.Length < token.Length;
+        var prefixed = FindVoiceByAlias(settings, trailingColons ? aliasToken : token);
+        if (prefixed != null)
+        {
+            result.Voice = prefixed;
+            result.RawPrefix = token;
+            result.Message = rest;
+            return FinishPrefix(result, userId, settings);
+        }
+
+        result.Voice = ResolveStickyOrDefault(userId, settings);
+        result.Message = text;
+        if (!CanUseVoice(userId, result.Voice, null, settings))
+        {
+            result.ErrorKey = "unpaid";
+            result.RawPrefix = result.Voice.Alias;
+        }
+
+        return result;
+    }
+
+    private PrefixParse FinishPrefix(PrefixParse result, string userId, Settings settings)
+    {
         if (!CanUseVoice(userId, result.Voice, result.Style, settings))
         {
             result.ErrorKey = "unpaid";
@@ -500,44 +528,23 @@ public class CPHInline
         string path = null;
         try
         {
-            string locale = LocaleFromVoice(azureVoice);
-            string inner = XmlEscape(text);
-            if (!string.IsNullOrEmpty(style))
-            {
-                inner = "<mstts:express-as style=\"" + XmlEscape(style) + "\">" + inner + "</mstts:express-as>";
-            }
-
-            string ssml = "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" " + "xmlns:mstts=\"https://www.w3.org/2001/mstts\" xml:lang=\"" + locale + "\">" + "<voice name=\"" + XmlEscape(azureVoice) + "\">" + inner + "</voice></speak>";
-            string url = "https://" + settings.Region + ".tts.speech.microsoft.com/cognitiveservices/v1";
             path = Path.Combine(Path.GetTempPath(), "sb-tts-" + Guid.NewGuid().ToString("N") + ".mp3");
+            string url = "https://" + settings.Region.Trim() + ".tts.speech.microsoft.com/cognitiveservices/v1";
+            log.Info("Azure voice=" + azureVoice + " style=" + (style ?? "-") + " region=" + settings.Region);
             bool downloaded = false;
-            foreach (string key in keys)
+            foreach (string ssml in BuildSsmlAttempts(azureVoice, style, text))
             {
-                using (var req = new HttpRequestMessage(HttpMethod.Post, url))
+                foreach (string key in keys)
                 {
-                    req.Headers.TryAddWithoutValidation("Ocp-Apim-Subscription-Key", key);
-                    req.Headers.TryAddWithoutValidation("User-Agent", "StreamerBotTts");
-                    req.Headers.TryAddWithoutValidation("X-Microsoft-OutputFormat", "audio-16khz-128kbitrate-mono-mp3");
-                    req.Content = new StringContent(ssml, Encoding.UTF8, "application/ssml+xml");
-                    using (var resp = Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+                    if (TryPostAzure(url, key, ssml, path, log))
                     {
-                        if (!resp.IsSuccessStatusCode)
-                        {
-                            string err = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                            log.Error("Azure HTTP " + (int)resp.StatusCode + " " + Trim(err, 400));
-                            continue;
-                        }
-
-                        using (var src = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
-                        using (var dst = File.Create(path))
-                        {
-                            src.CopyTo(dst);
-                        }
-
                         downloaded = true;
                         break;
                     }
                 }
+
+                if (downloaded)
+                    break;
             }
 
             if (!downloaded)
@@ -561,6 +568,101 @@ public class CPHInline
         finally
         {
             TryDelete(path);
+        }
+    }
+
+    private static IEnumerable<string> BuildSsmlAttempts(string azureVoice, string style, string text)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string voice in VoiceNameFallbacks(azureVoice))
+        {
+            string locale = LocaleFromVoice(voice);
+            foreach (string ssml in new[] { BuildSsml(voice, locale, style, text, false), BuildSsml(voice, locale, style, text, true), BuildSsml(voice, locale, null, text, true), })
+            {
+                if (seen.Add(ssml))
+                    yield return ssml;
+            }
+        }
+    }
+
+    private static IEnumerable<string> VoiceNameFallbacks(string azureVoice)
+    {
+        yield return azureVoice;
+        if (string.IsNullOrWhiteSpace(azureVoice))
+            yield break;
+        if (azureVoice.EndsWith("Neural", StringComparison.OrdinalIgnoreCase) && azureVoice.IndexOf("Multilingual", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            int cut = azureVoice.Length - "Neural".Length;
+            yield return azureVoice.Substring(0, cut) + "MultilingualNeural";
+        }
+    }
+
+    private static string BuildSsml(string azureVoice, string locale, string style, string text, bool wrapEnglish)
+    {
+        string inner = XmlEscape(text);
+        if (wrapEnglish && LooksMostlyLatin(text) && !locale.StartsWith("en", StringComparison.OrdinalIgnoreCase))
+            inner = "<lang xml:lang=\"en-US\">" + inner + "</lang>";
+        bool useStyle = !string.IsNullOrEmpty(style);
+        if (useStyle)
+            inner = "<mstts:express-as style=\"" + XmlEscape(style) + "\">" + inner + "</mstts:express-as>";
+        string ns = "xmlns=\"http://www.w3.org/2001/10/synthesis\"";
+        if (useStyle)
+            ns += " xmlns:mstts=\"https://www.w3.org/2001/mstts\"";
+        return "<speak version=\"1.0\" " + ns + " xml:lang=\"" + locale + "\">" + "<voice name=\"" + XmlEscape(azureVoice) + "\">" + inner + "</voice></speak>";
+    }
+
+    private static bool LooksMostlyLatin(string text)
+    {
+        int letters = 0;
+        int latin = 0;
+        foreach (char c in text ?? "")
+        {
+            if (!char.IsLetter(c))
+                continue;
+            letters++;
+            if (c <= 0x024F)
+                latin++;
+        }
+
+        return letters == 0 || latin * 2 >= letters;
+    }
+
+    private bool TryPostAzure(string url, string key, string ssml, string path, ExtensionLogger log)
+    {
+        try
+        {
+            using (var req = new HttpRequestMessage(HttpMethod.Post, url))
+            {
+                req.Headers.TryAddWithoutValidation("Ocp-Apim-Subscription-Key", key);
+                req.Headers.TryAddWithoutValidation("User-Agent", "StreamerBotTts");
+                req.Headers.TryAddWithoutValidation("X-Microsoft-OutputFormat", "audio-16khz-128kbitrate-mono-mp3");
+                byte[] bytes = Encoding.UTF8.GetBytes(ssml);
+                var content = new ByteArrayContent(bytes);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/ssml+xml");
+                req.Content = content;
+                using (var resp = Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+                {
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        string err = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                        log.Error("Azure HTTP " + (int)resp.StatusCode + " voice-ssml failed: " + Trim(err, 500));
+                        return false;
+                    }
+
+                    using (var src = resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
+                    using (var dst = File.Create(path))
+                    {
+                        src.CopyTo(dst);
+                    }
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.Error("Azure post " + ex.GetType().Name + ": " + ex.Message);
+            return false;
         }
     }
 
@@ -655,12 +757,23 @@ public class CPHInline
         }
     }
 
-    private int CooldownRemainingSeconds(string userId, int cooldownSeconds)
+    private int CooldownRemainingSeconds(string userId, string userName, int cooldownSeconds)
     {
-        if (cooldownSeconds <= 0 || string.IsNullOrWhiteSpace(userId))
+        if (cooldownSeconds <= 0)
             return 0;
-        string raw = CPH.GetTwitchUserVarById<string>(userId, LastMsVar, false);
-        if (string.IsNullOrWhiteSpace(raw) || !long.TryParse(raw, out long last) || last <= 0)
+        string key = CooldownKey(userId, userName);
+        if (string.IsNullOrWhiteSpace(key))
+            return 0;
+        long last = 0;
+        lock (CooldownGate)
+        {
+            LastSpeakLocal.TryGetValue(key, out last);
+        }
+
+        long stored = ReadLastSpeakMs(userId, userName);
+        if (stored > last)
+            last = stored;
+        if (last <= 0)
             return 0;
         long elapsed = UnixMs() - last;
         long need = cooldownSeconds * 1000L;
@@ -670,11 +783,133 @@ public class CPHInline
         return (int)Math.Ceiling(left / 1000.0);
     }
 
-    private void SetLastSpeakMs(string userId, long ms)
+    private void SetLastSpeakMs(string userId, string userName, long ms)
     {
-        if (string.IsNullOrWhiteSpace(userId))
+        string key = CooldownKey(userId, userName);
+        if (string.IsNullOrWhiteSpace(key) || ms <= 0)
             return;
-        CPH.SetTwitchUserVarById(userId, LastMsVar, ms.ToString(CultureInfo.InvariantCulture), false);
+        lock (CooldownGate)
+        {
+            LastSpeakLocal[key] = ms;
+        }
+
+        WriteLastSpeakMsVar(userId, userName, ms);
+    }
+
+    private void WriteLastSpeakMsVar(string userId, string userName, long ms)
+    {
+        string value = ms.ToString(CultureInfo.InvariantCulture);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(userId))
+                CPH.SetTwitchUserVarById(userId, LastMsVar, value, false);
+            else if (!string.IsNullOrWhiteSpace(userName))
+                CPH.SetTwitchUserVar(userName, LastMsVar, value, false);
+        }
+        catch
+        {
+        }
+    }
+
+    private long ReadLastSpeakMs(string userId, string userName)
+    {
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            long fromId = ReadUserVarMsById(userId);
+            if (fromId > 0)
+                return fromId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(userName))
+            return ReadUserVarMsByName(userName);
+        return 0;
+    }
+
+    private long ReadUserVarMsById(string userId)
+    {
+        try
+        {
+            long n = CPH.GetTwitchUserVarById<long>(userId, LastMsVar, false);
+            if (n > 0)
+                return n;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            return CoerceUnixMs(CPH.GetTwitchUserVarById<string>(userId, LastMsVar, false));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private long ReadUserVarMsByName(string userName)
+    {
+        try
+        {
+            long n = CPH.GetTwitchUserVar<long>(userName, LastMsVar, false);
+            if (n > 0)
+                return n;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            return CoerceUnixMs(CPH.GetTwitchUserVar<string>(userName, LastMsVar, false));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long CoerceUnixMs(object raw)
+    {
+        if (raw == null)
+            return 0;
+        if (raw is long l)
+            return l > 0 ? l : 0;
+        if (raw is int i)
+            return i > 0 ? i : 0;
+        if (raw is double d && d > 0 && d <= long.MaxValue)
+            return (long)d;
+        string s = Convert.ToString(raw, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(s))
+            return 0;
+        if (long.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed) && parsed > 0)
+            return parsed;
+        return 0;
+    }
+
+    private static string CooldownKey(string userId, string userName)
+    {
+        if (!string.IsNullOrWhiteSpace(userId))
+            return "id:" + userId.Trim();
+        if (!string.IsNullOrWhiteSpace(userName))
+            return "name:" + userName.Trim();
+        return "";
+    }
+
+    private string ResolveUserId(EventContext ev)
+    {
+        if (!string.IsNullOrWhiteSpace(ev.UserId))
+            return ev.UserId.Trim();
+        return FirstArg("userId", "UserId", "userID", "fromId");
+    }
+
+    private static string CooldownUserName(EventContext ev, string mention)
+    {
+        if (!string.IsNullOrWhiteSpace(ev.UserName))
+            return ev.UserName.Trim();
+        if (!string.IsNullOrWhiteSpace(ev.User))
+            return ev.User.Trim();
+        return mention ?? "";
     }
 
     private List<string> GetOwned(string userId)
@@ -930,6 +1165,7 @@ public class CPHInline
         return "";
     }
 
+    private static readonly char[] WordSeparators = { ' ' };
     private string CheckMessage(string message, Settings settings)
     {
         if (string.IsNullOrWhiteSpace(message))
@@ -938,7 +1174,210 @@ public class CPHInline
             return "too_long";
         if (settings.BlockUrls && UrlLike.IsMatch(message))
             return "url";
+        return CheckAntiSpam(message, settings);
+    }
+
+    private static string CheckAntiSpam(string message, Settings settings)
+    {
+        bool needWords = settings.SpamBlockedWords
+            || settings.SpamWordRepeat
+            || settings.SpamPhrase
+            || settings.SpamUnique;
+        if (!settings.SpamCharRepeat && !needWords)
+            return null;
+        string normalized = NormalizeMessage(message);
+        if (string.IsNullOrEmpty(normalized))
+            return null;
+        string[] words = needWords ? Tokenize(normalized) : Array.Empty<string>();
+        if (settings.SpamBlockedWords && HasBlockedTerm(words, settings.BlockedWords))
+            return "spam_blocked";
+        if (settings.SpamCharRepeat && HasTooManyRepeatedChars(normalized, settings.SpamCharRepeatMax))
+            return "spam_char";
+        if (settings.SpamWordRepeat && HasRepeatedWord(words, settings.SpamWordRepeatMax))
+            return "spam_word";
+        if (settings.SpamPhrase && HasRepetitivePhrase(words, settings.SpamPhraseMaxWords, settings.SpamPhraseMinRepeats))
+            return "spam_phrase";
+        if (settings.SpamUnique && words.Length >= settings.SpamUniqueMinWords)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var w in words)
+                seen.Add(w);
+            if ((double)seen.Count / words.Length < settings.SpamUniqueMinRatio)
+                return "spam_unique";
+        }
+
         return null;
+    }
+
+    private static string NormalizeMessage(string message)
+    {
+        var trimmed = (message ?? "").Trim();
+        var sb = new StringBuilder(trimmed.Length);
+        bool prevSpace = false;
+        foreach (var ch in trimmed)
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                if (!prevSpace)
+                {
+                    sb.Append(' ');
+                    prevSpace = true;
+                }
+            }
+            else
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+                prevSpace = false;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string[] Tokenize(string normalized)
+    {
+        if (string.IsNullOrEmpty(normalized))
+            return Array.Empty<string>();
+        var parts = normalized.Split(WordSeparators, StringSplitOptions.RemoveEmptyEntries);
+        int n = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string t = NormalizeToken(parts[i]);
+            if (t.Length == 0)
+                continue;
+            parts[n++] = t;
+        }
+
+        if (n == parts.Length)
+            return parts;
+        var trimmed = new string[n];
+        Array.Copy(parts, trimmed, n);
+        return trimmed;
+    }
+
+    private static string NormalizeToken(string word)
+    {
+        if (string.IsNullOrEmpty(word))
+            return "";
+        int start = 0;
+        int end = word.Length - 1;
+        while (start <= end && char.IsPunctuation(word[start]))
+            start++;
+        while (end >= start && char.IsPunctuation(word[end]))
+            end--;
+        if (start > end)
+            return "";
+        return word.Substring(start, end - start + 1);
+    }
+
+    private static bool HasBlockedTerm(string[] words, string[] blocked)
+    {
+        if (blocked == null || blocked.Length == 0 || words == null || words.Length == 0)
+            return false;
+        string padded = null;
+        for (int b = 0; b < blocked.Length; b++)
+        {
+            string term = string.Join(" ", Tokenize(NormalizeMessage(blocked[b] ?? "")));
+            if (term.Length == 0)
+                continue;
+            if (term.IndexOf(' ') >= 0)
+            {
+                if (padded == null)
+                    padded = " " + string.Join(" ", words) + " ";
+                if (padded.IndexOf(" " + term + " ", StringComparison.Ordinal) >= 0)
+                    return true;
+            }
+            else
+            {
+                for (int i = 0; i < words.Length; i++)
+                {
+                    if (words[i] == term)
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasTooManyRepeatedChars(string text, int maxSame)
+    {
+        if (maxSame < 1 || text.Length == 0)
+            return false;
+        int run = 1;
+        for (int i = 1; i < text.Length; i++)
+        {
+            if (text[i] == text[i - 1] && !char.IsWhiteSpace(text[i]))
+            {
+                run++;
+                if (run > maxSame)
+                    return true;
+            }
+            else
+            {
+                run = 1;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasRepeatedWord(string[] words, int maxCopies)
+    {
+        if (words == null || words.Length == 0 || maxCopies < 1)
+            return false;
+        int run = 1;
+        string prev = words[0];
+        for (int i = 1; i < words.Length; i++)
+        {
+            if (words[i] == prev)
+            {
+                run++;
+                if (run > maxCopies)
+                    return true;
+            }
+            else
+            {
+                run = 1;
+                prev = words[i];
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasRepetitivePhrase(string[] words, int maxPatternLen, int minRepeats)
+    {
+        if (words == null || words.Length == 0)
+            return false;
+        int n = words.Length;
+        maxPatternLen = Math.Max(1, Math.Min(maxPatternLen, n / 2));
+        minRepeats = Math.Max(2, minRepeats);
+        for (int pl = 1; pl <= maxPatternLen; pl++)
+        {
+            if (n < pl * minRepeats)
+                continue;
+            for (int start = 0; start <= n - pl * minRepeats; start++)
+            {
+                bool allEqual = true;
+                for (int r = 1; r < minRepeats && allEqual; r++)
+                {
+                    for (int i = 0; i < pl; i++)
+                    {
+                        if (words[start + (r - 1) * pl + i] != words[start + r * pl + i])
+                        {
+                            allEqual = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (allEqual)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private VoiceInfo FindVoice(Settings settings, string input)
@@ -949,6 +1388,20 @@ public class CPHInline
         foreach (var v in settings.Catalog)
         {
             if (Eq(v.Alias, want) || Eq(v.Display, want))
+                return v;
+        }
+
+        return null;
+    }
+
+    private VoiceInfo FindVoiceByAlias(Settings settings, string input)
+    {
+        string want = (input ?? "").Trim();
+        if (want.Length == 0)
+            return null;
+        foreach (var v in settings.Catalog)
+        {
+            if (Eq(v.Alias, want))
                 return v;
         }
 
@@ -983,10 +1436,8 @@ public class CPHInline
     {
         string voices = string.Join(", ", settings.Catalog.Select(v => v.Display + " (" + v.Alias + ")"));
         var def = FindVoice(settings, settings.DefaultVoice);
-        string prefixEx = (def != null ? def.Alias : "en") + ":";
         var sample = settings.Catalog.FirstOrDefault(v => !Eq(v.Alias, settings.DefaultVoice)) ?? def;
-        if (sample != null)
-            prefixEx = sample.Alias + (sample.Styles.Length > 0 ? ":" + sample.Styles[0] : ":");
+        string prefixEx = (sample != null ? sample.Alias : "fr") + " ";
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["user"] = user ?? "",
@@ -1009,13 +1460,8 @@ public class CPHInline
             return d;
         d["alias"] = voice.Alias;
         d["styles"] = FormatStyles(voice);
-        string styleEx = voice.Styles.Length > 0 ? voice.Styles[0] : "";
-        d["prefix"] = voice.Alias + ":";
-        d["style"] = styleEx;
-        if (styleEx.Length > 0)
-            d["prefix"] = voice.Alias + ":" + styleEx + " ";
-        else
-            d["prefix"] = voice.Alias + ":";
+        d["style"] = voice.Styles.Length > 0 ? voice.Styles[0] : "";
+        d["prefix"] = voice.Alias + " ";
         d["voices"] = string.Join(", ", settings.Catalog.Select(v => v.Display + " (" + v.Alias + ")"));
         return d;
     }
@@ -1063,6 +1509,13 @@ public class CPHInline
                 return s.MsgTooLong;
             case "url":
                 return s.MsgUrl;
+            case "spam":
+            case "spam_char":
+            case "spam_word":
+            case "spam_phrase":
+            case "spam_unique":
+            case "spam_blocked":
+                return s.MsgSpam;
             default:
                 return s.MsgUnpaid;
         }
@@ -1099,6 +1552,15 @@ public class CPHInline
     }
 
     private static int Clamp(int value, int min, int max)
+    {
+        if (value < min)
+            return min;
+        if (value > max)
+            return max;
+        return value;
+    }
+
+    private static double ClampDouble(double value, double min, double max)
     {
         if (value < min)
             return min;
