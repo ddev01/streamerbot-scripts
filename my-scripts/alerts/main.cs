@@ -1,4 +1,4 @@
-﻿using FluentConfig;
+using FluentConfig;
 using FluentConfig.Runtime;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Threading;
 
 // Refs: System, System.Core, Newtonsoft.Json.dll, FluentConfig.dll (Streamer.bot dlls/).
 #if EXTERNAL_EDITOR
@@ -329,6 +330,7 @@ static class AlertsOverlayDisk
         return Path.Combine(SbRoot(), "overlays", "choppa-alerts");
     }
 
+    private static int _networkBusy;
     public static string Ensure(string version, string repo)
     {
         Directory.CreateDirectory(BrandRoot());
@@ -336,17 +338,41 @@ static class AlertsOverlayDisk
         Directory.CreateDirectory(MediaDir());
         MigrateLegacy();
         string stamp = Path.Combine(Root(), "overlay.version");
-        bool stale = !File.Exists(HtmlPath()) || !File.Exists(PickerPath()) || !File.Exists(stamp) || !string.Equals((File.ReadAllText(stamp) ?? "").Trim(), version ?? "", StringComparison.Ordinal);
-        if (stale)
-        {
-            bool overlayOk = TryPull(repo, "overlay.html", HtmlPath());
-            bool pickerOk = TryPull(repo, "picker.html", PickerPath());
-            if (overlayOk && pickerOk)
-                File.WriteAllText(stamp, version ?? "", new UTF8Encoding(false));
-        }
-
-        EnsureClient(Root());
+        bool haveHtml = File.Exists(HtmlPath()) && File.Exists(PickerPath());
+        bool stampOk = File.Exists(stamp) && string.Equals((File.ReadAllText(stamp) ?? "").Trim(), version ?? "", StringComparison.Ordinal);
+        bool clientOk = ClientPresent(Root());
+        if (!haveHtml)
+            PullOverlay(version, repo, stamp, waitForClient: true);
+        else if (!stampOk || !clientOk)
+            BeginPullOverlay(version, repo, stamp);
         return new Uri(HtmlPath()).AbsoluteUri;
+    }
+
+    private static void BeginPullOverlay(string version, string repo, string stamp)
+    {
+        if (Interlocked.CompareExchange(ref _networkBusy, 1, 0) != 0)
+            return;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                PullOverlay(version, repo, stamp, waitForClient: true);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _networkBusy, 0);
+            }
+        });
+    }
+
+    private static void PullOverlay(string version, string repo, string stamp, bool waitForClient)
+    {
+        bool overlayOk = TryPull(repo, "overlay.html", HtmlPath());
+        bool pickerOk = TryPull(repo, "picker.html", PickerPath());
+        if (overlayOk && pickerOk)
+            File.WriteAllText(stamp, version ?? "", new UTF8Encoding(false));
+        if (waitForClient)
+            EnsureClient(Root());
     }
 
     public static void MigrateLegacy()
@@ -387,7 +413,7 @@ static class AlertsOverlayDisk
         {
             try
             {
-                using (var wc = new WebClient())
+                using (var wc = new TimedWebClient())
                 {
                     wc.Headers.Add("User-Agent", "ChoppaAlerts");
                     wc.DownloadFile(url, tmp);
@@ -416,19 +442,35 @@ static class AlertsOverlayDisk
         return File.Exists(dest);
     }
 
-    private static void EnsureClient(string root)
+    private static bool ClientPresent(string root)
     {
         string path = Path.Combine(root, "streamerbot-client.js");
-        if (File.Exists(path) && new FileInfo(path).Length > 1000)
+        return File.Exists(path) && new FileInfo(path).Length > 1000;
+    }
+
+    private static void EnsureClient(string root)
+    {
+        if (ClientPresent(root))
             return;
         try
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-            using (var wc = new WebClient())
-                wc.DownloadFile("https://cdn.jsdelivr.net/npm/@streamerbot/client/dist/streamerbot-client.js", path);
+            using (var wc = new TimedWebClient())
+                wc.DownloadFile("https://cdn.jsdelivr.net/npm/@streamerbot/client/dist/streamerbot-client.js", Path.Combine(root, "streamerbot-client.js"));
         }
         catch
         {
+        }
+    }
+
+    private sealed class TimedWebClient : WebClient
+    {
+        protected override WebRequest GetWebRequest(Uri address)
+        {
+            var req = base.GetWebRequest(address);
+            if (req != null)
+                req.Timeout = 8000;
+            return req;
         }
     }
 
