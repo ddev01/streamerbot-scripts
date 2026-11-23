@@ -9,23 +9,16 @@ public class CPHInline
 {
     private const string Title = "First Chatters";
     private const string Version = "1.0.0";
+    private const string MainActionId = "f8df8367-7f50-48fe-a625-9221430d24d0";
     private static readonly string CounterVar = Fc.KeyFor(Title, "counter");
     private static readonly string UsersVar = Fc.KeyFor(Title, "users");
-    private static readonly string ActionIdVar = Fc.KeyFor(Title, "action_id");
     public bool Execute()
     {
         var log = Fc.Logger(CPH, Title, Version);
         CPH.SetGlobalVar(CounterVar, 0, true);
         CPH.SetGlobalVar(UsersVar, "[]", true);
         log.Info("Reset counter and winners.");
-        string actionId = CPH.GetGlobalVar<string>(ActionIdVar, true);
-        if (string.IsNullOrWhiteSpace(actionId))
-        {
-            log.Warn("Cannot re-enable main: no saved action id. Run the main action once from a trigger first.");
-            return true;
-        }
-
-        CPH.EnableActionById(actionId);
+        CPH.EnableActionById(MainActionId);
         log.Info("Main action re-enabled.");
         return true;
     }

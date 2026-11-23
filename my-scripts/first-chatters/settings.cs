@@ -13,6 +13,7 @@ public class CPHInline
     {
         public const string Title = "First Chatters";
         public const string Version = "1.0.0";
+        public const string MainActionId = "f8df8367-7f50-48fe-a625-9221430d24d0";
         public const string Repo = "ddev01/streamerbot-scripts";
         public const string TagPrefix = "first-chatters";
     }
