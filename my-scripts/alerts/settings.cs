@@ -36,7 +36,7 @@ public class CPHInline
     {
         Timeout = TimeSpan.FromSeconds(20)
     };
-    private const string SoundLibraryHint = "No in-app sound search like Giphy. Meme boards have no official API we can ship, and downloading from them in the menu would be scraping. Legal APIs (stock/CC libraries) are not meme soundboards. Open MyInstants in your browser, download an MP3, then File — we copy it into Chopa/media.";
+    private const string SoundLibraryHint = "No in-app sound search like Giphy. Meme boards have no official API we can ship, and downloading from them in the menu would be scraping. Legal APIs (stock/CC libraries) are not meme soundboards. Open MyInstants in your browser, download an MP3, then File - we copy it into Chopa/media.";
     private static (string value, string label)[] _rewardPairs;
     private static long _rewardPairsAt;
     public bool Execute()
@@ -122,7 +122,7 @@ public class CPHInline
                                     .Size("shrink-0")
                                     .OnClick(BrowseLocalSound)
                                 .Button("MyInstants")
-                                    .Hint("Opens myinstants.com in your browser. Download an MP3 there, then File — we copy it into Chopa/media.")
+                                    .Hint("Opens myinstants.com in your browser. Download an MP3 there, then File - we copy it into Chopa/media.")
                                     .Size("shrink-0")
                                     .OnClick(OpenMyInstants)
                                 .Button("i")
@@ -737,4 +737,5 @@ static class AlertsOverlayDisk
         string s = sb.ToString().Trim('.', ' ');
         return string.IsNullOrWhiteSpace(s) ? "media.bin" : s;
     }
+
 }
