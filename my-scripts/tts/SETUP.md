@@ -90,7 +90,7 @@ Commands:
 
 Run **`{TTS} 0 Settings`**, Save once (seeds English/French/Spanish/Chinese/German). Then:
 
-1. Paste the Azure Speech **key** (and region, default `northeurope`)
+1. Paste the Azure Speech **key** (and region). Region must match the resource. Default `northeurope` has standard Neural TTS only — **not Dragon HD**. Seed English/French IDs are HD; speak falls back to `…MultilingualNeural` on that region. For actual HD audio, create Speech in a region that lists HD (e.g. `swedencentral`) and set Region to that id.
 2. Refresh and pick the two rewards
 3. Confirm Azure voice IDs on each pill (edit to taste). Leave **Styles** empty unless you want `alias::style` later
 4. Default voice alias should be `en` (free English, no prefix needed)

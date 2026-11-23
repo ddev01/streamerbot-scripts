@@ -523,14 +523,15 @@ public class CPHInline
         {
             path = Path.Combine(Path.GetTempPath(), "sb-tts-" + Guid.NewGuid().ToString("N") + ".mp3");
             string url = "https://" + settings.Region.Trim() + ".tts.speech.microsoft.com/cognitiveservices/v1";
-            log.Info("Azure voice=" + azureVoice + " style=" + (style ?? "-") + " region=" + settings.Region);
+            log.Info("Azure requested=" + azureVoice + " style=" + (style ?? "-") + " region=" + settings.Region);
             bool downloaded = false;
-            foreach (string ssml in BuildSsmlAttempts(azureVoice, style, text))
+            foreach (var attempt in BuildSsmlAttempts(azureVoice, style, text))
             {
                 foreach (string key in keys)
                 {
-                    if (TryPostAzure(url, key, ssml, path, log))
+                    if (TryPostAzure(url, key, attempt.Ssml, path, log, attempt.Voice))
                     {
+                        log.Info("Azure used voice=" + attempt.Voice + (Eq(attempt.Voice, azureVoice) ? "" : " (app fallback, not Azure)"));
                         downloaded = true;
                         break;
                     }
@@ -541,7 +542,10 @@ public class CPHInline
             }
 
             if (!downloaded)
+            {
+                log.Error("Azure synthesis failed for all app voice fallbacks.");
                 return false;
+            }
             var info = new FileInfo(path);
             if (!info.Exists || info.Length <= 0)
             {
@@ -564,44 +568,68 @@ public class CPHInline
         }
     }
 
-    private static IEnumerable<string> BuildSsmlAttempts(string azureVoice, string style, string text)
+    private static IEnumerable<(string Voice, string Ssml)> BuildSsmlAttempts(string azureVoice, string style, string text)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (string voice in VoiceNameFallbacks(azureVoice))
         {
             string locale = LocaleFromVoice(voice);
-            foreach (string ssml in new[]
+            var ssmls = new[]
             {
-                BuildSsml(voice, locale, style, text, false),
                 BuildSsml(voice, locale, style, text, true),
+                BuildSsml(voice, locale, style, text, false),
                 BuildSsml(voice, locale, null, text, true),
-            }
-
-            )
+                BuildSsml(voice, locale, null, text, false),
+            };
+            foreach (string ssml in ssmls)
             {
                 if (seen.Add(ssml))
-                    yield return ssml;
+                    yield return (voice, ssml);
             }
         }
     }
 
     private static IEnumerable<string> VoiceNameFallbacks(string azureVoice)
     {
-        yield return azureVoice;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool Offer(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name) || !seen.Add(name))
+                return false;
+            return true;
+        }
+
+        if (Offer(azureVoice))
+            yield return azureVoice;
         if (string.IsNullOrWhiteSpace(azureVoice))
             yield break;
+        int colon = azureVoice.IndexOf(':');
+        if (colon > 0)
+        {
+            string persona = azureVoice.Substring(0, colon);
+            if (Offer(persona + "MultilingualNeural"))
+                yield return persona + "MultilingualNeural";
+            if (Offer(persona + "Neural"))
+                yield return persona + "Neural";
+            yield break;
+        }
+
         if (azureVoice.EndsWith("Neural", StringComparison.OrdinalIgnoreCase) && azureVoice.IndexOf("Multilingual", StringComparison.OrdinalIgnoreCase) < 0)
         {
             int cut = azureVoice.Length - "Neural".Length;
-            yield return azureVoice.Substring(0, cut) + "MultilingualNeural";
+            string multi = azureVoice.Substring(0, cut) + "MultilingualNeural";
+            if (Offer(multi))
+                yield return multi;
         }
     }
 
-    private static string BuildSsml(string azureVoice, string locale, string style, string text, bool wrapEnglish)
+    private static string BuildSsml(string azureVoice, string locale, string style, string text, bool pinVoiceLocale)
     {
         string inner = XmlEscape(text);
-        if (wrapEnglish && LooksMostlyLatin(text) && !locale.StartsWith("en", StringComparison.OrdinalIgnoreCase))
-            inner = "<lang xml:lang=\"en-US\">" + inner + "</lang>";
+        // Pin the gallery "language skill" (fr-FR, zh-CN, …). Auto-detect on English chat
+        // switches multilingual/HD voices to native English and drops the accent.
+        if (pinVoiceLocale && !string.IsNullOrEmpty(locale))
+            inner = "<lang xml:lang=\"" + XmlEscape(locale) + "\">" + inner + "</lang>";
         bool useStyle = !string.IsNullOrEmpty(style);
         if (useStyle)
             inner = "<mstts:express-as style=\"" + XmlEscape(style) + "\">" + inner + "</mstts:express-as>";
@@ -611,23 +639,7 @@ public class CPHInline
         return "<speak version=\"1.0\" " + ns + " xml:lang=\"" + locale + "\">" + "<voice name=\"" + XmlEscape(azureVoice) + "\">" + inner + "</voice></speak>";
     }
 
-    private static bool LooksMostlyLatin(string text)
-    {
-        int letters = 0;
-        int latin = 0;
-        foreach (char c in text ?? "")
-        {
-            if (!char.IsLetter(c))
-                continue;
-            letters++;
-            if (c <= 0x024F)
-                latin++;
-        }
-
-        return letters == 0 || latin * 2 >= letters;
-    }
-
-    private bool TryPostAzure(string url, string key, string ssml, string path, ExtensionLogger log)
+    private bool TryPostAzure(string url, string key, string ssml, string path, ExtensionLogger log, string voice)
     {
         try
         {
@@ -645,7 +657,7 @@ public class CPHInline
                     if (!resp.IsSuccessStatusCode)
                     {
                         string err = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                        log.Error("Azure HTTP " + (int)resp.StatusCode + " voice-ssml failed: " + Trim(err, 500));
+                        log.Error("Azure HTTP " + (int)resp.StatusCode + " voice=" + voice + " failed: " + Trim(err, 500));
                         return false;
                     }
 

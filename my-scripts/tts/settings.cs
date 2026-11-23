@@ -29,7 +29,7 @@ public class CPHInline
         Fc.Open(CPH, ExtensionInfo.Title, ExtensionInfo.Version, ui => ui
                 .WithExtensionUpdateNotice(ExtensionInfo.Repo, ExtensionInfo.Version, tagPrefix: ExtensionInfo.TagPrefix)
                 .Section("Azure", "Azure", a => a
-                    .Intro("Synthesize with Azure Neural TTS (same path as the latency test). " + "Paste a Speech resource key. See SETUP.md for Streamer.bot wiring.")
+                    .Intro("Synthesize with Azure Neural TTS (same path as the latency test). " + "Paste a Speech resource key. Region must match the Speech resource. " + "Dragon HD voice IDs (`Name:DragonHDLatestNeural`) are not in northeurope — speak falls back to `NameMultilingualNeural`. For real HD audio, use a resource in a region that lists HD (e.g. swedencentral) or pick a non-HD voice. See SETUP.md."))
                     .Textbox("Subscription key", "azure_key")
                         .Hint("Primary key from the Azure Speech resource.")
                         .Password()
@@ -38,7 +38,7 @@ public class CPHInline
                         .Password()
                     .Grid("grid-cols-2 items-center", g => g
                         .Textbox("Region", "region")
-                            .Hint("Short region name, e.g. northeurope.")
+                            .Hint("Must match the Speech resource. northeurope has standard Neural TTS, not Dragon HD.")
                             .Default("northeurope")
                         .Slider("Volume", "volume")
                             .Hint("Playback volume (0–100).")
@@ -139,7 +139,7 @@ public class CPHInline
                             .Textbox("Display name", "{name}_display")
                                 .Hint("Shown in chat and accepted on unlock, e.g. French.")
                             .Textbox("Azure voice ID", "{name}_azure")
-                                .Hint("Full Neural name, e.g. fr-FR-DeniseNeural.")
+                                .Hint("Full Neural name, e.g. en-GB-Ollie:DragonHDLatestNeural or en-GB-OllieMultilingualNeural.")
                             .Textbox("Styles", "{name}_styles")
                                 .Hint("Leave empty. Azure style ids only if you want alias::style later, e.g. cheerful, sad."))
                         .OnPillAdded((name, ctx) => SyncDefaultVoice(ctx, null))
@@ -196,7 +196,7 @@ public class CPHInline
                         .Default("TTS rewards are live.")
                     .Textbox("Speak is reward-only", "msg_speak_reward_only")
                         .Default("@{user} Speak with the TTS Message reward, not !tts. Try !tts for help.")
-                    .Textbox("Azure failed (already charged)", "msg_synth_fail")
+                    .Textbox("Azure / playback failed (refund)", "msg_synth_fail")
                         .Default("@{user} TTS failed to play. Try again in a bit.")));
         return true;
     }
@@ -236,7 +236,7 @@ public class CPHInline
 
     private static void SeedDefaults(JObject o)
     {
-        o["region"] = "northeurope";
+        o["region"] = "westeurope";
         o["volume"] = 50;
         o["cooldown_seconds"] = 15;
         o["max_chars"] = 250;
